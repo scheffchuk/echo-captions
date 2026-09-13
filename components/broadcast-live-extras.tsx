@@ -1,0 +1,110 @@
+"use client";
+
+import { BookText, Check, Copy, MoreHorizontal, QrCode } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { BroadcastGlossaryPanel } from "@/components/broadcast-glossary-panel";
+import type { StoredTranslationMapping } from "@/components/translation-mappings-field";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { Id } from "@/convex/_generated/dataModel";
+import { getViewerUrl } from "@/lib/viewer-url";
+
+export function BroadcastLiveExtras({
+	slug,
+	sessionId,
+	initialMappings,
+	initialRevisionId,
+	audienceCodes,
+}: {
+	slug: string;
+	sessionId: Id<"sessions">;
+	initialMappings: StoredTranslationMapping[] | undefined;
+	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
+	audienceCodes: string[];
+}) {
+	const [qrOpen, setQrOpen] = useState(false);
+	const [glossaryOpen, setGlossaryOpen] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const viewerUrl = getViewerUrl(slug);
+
+	const copyLink = async () => {
+		await navigator.clipboard.writeText(viewerUrl);
+		setCopied(true);
+		toast.success("Viewer link copied");
+		setTimeout(() => setCopied(false), 2000);
+	};
+
+	return (
+		<>
+			<DropdownMenu>
+				<DropdownMenuTrigger asChild>
+					<Button
+						variant="outline"
+						size="sm"
+						className="gap-1.5"
+						aria-label="More session tools"
+					>
+						<MoreHorizontal className="size-4" />
+						More
+					</Button>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align="end">
+					<DropdownMenuItem onSelect={() => void copyLink()}>
+						{copied ? (
+							<Check className="size-4" />
+						) : (
+							<Copy className="size-4" />
+						)}
+						{copied ? "Copied" : "Copy link"}
+					</DropdownMenuItem>
+					<DropdownMenuItem onSelect={() => setQrOpen(true)}>
+						<QrCode className="size-4" />
+						QR code
+					</DropdownMenuItem>
+					<DropdownMenuItem onSelect={() => setGlossaryOpen(true)}>
+						<BookText className="size-4" />
+						Glossary
+					</DropdownMenuItem>
+				</DropdownMenuContent>
+			</DropdownMenu>
+
+			<Dialog open={qrOpen} onOpenChange={setQrOpen}>
+				<DialogContent className="max-w-xs">
+					<DialogHeader>
+						<DialogTitle>Viewer QR code</DialogTitle>
+						<DialogDescription>
+							Audience can scan this to open captions.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex justify-center py-2">
+						<QRCodeSVG value={viewerUrl} size={180} />
+					</div>
+				</DialogContent>
+			</Dialog>
+
+			<BroadcastGlossaryPanel
+				sessionId={sessionId}
+				initialMappings={initialMappings}
+				initialRevisionId={initialRevisionId}
+				audienceCodes={audienceCodes}
+				trigger="none"
+				open={glossaryOpen}
+				onOpenChange={setGlossaryOpen}
+			/>
+		</>
+	);
+}

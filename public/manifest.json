@@ -1,0 +1,7 @@
+{
+	"name": "Echo",
+	"short_name": "Echo",
+	"theme_color": "#fafafa",
+	"background_color": "#fafafa",
+	"display": "standalone"
+}
