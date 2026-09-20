@@ -90,10 +90,43 @@ export type BroadcastTransitionDecision =
 			reason: "not_lost" | "not_active" | "conflict" | "invalid_state";
 	  };
 
+function broadcastStateError(state: BroadcastLifecycleState) {
+	if (state.pendingCommitCount < 0) {
+		return "Broadcast pending commit count is negative";
+	}
+
+	const hasFinalCommitOrdinal = state.finalCommitOrdinal !== undefined;
+	const isFinalized = state.status === "stopping" || state.status === "sealed";
+	if (hasFinalCommitOrdinal !== isFinalized) {
+		return "Broadcast final commit ordinal does not match its status";
+	}
+	if (
+		hasFinalCommitOrdinal &&
+		state.finalCommitOrdinal !== state.lastCommitOrdinal
+	) {
+		return "Broadcast final commit ordinal does not match its last commit ordinal";
+	}
+	if (state.status === "sealed" && state.pendingCommitCount !== 0) {
+		return "Sealed Broadcast still has pending commits";
+	}
+	return null;
+}
+
+function validateBroadcastState(broadcast: Doc<"broadcasts">) {
+	const error = broadcastStateError(broadcast);
+	return error === null
+		? Effect.succeed(broadcast)
+		: Effect.die(new Error(error));
+}
+
 export function classifyBroadcastTransition(
 	state: BroadcastLifecycleState,
 	transition: BroadcastTransition,
 ): BroadcastTransitionDecision {
+	if (broadcastStateError(state) !== null) {
+		return { kind: "invalid", reason: "invalid_state" };
+	}
+
 	if (transition.kind === "resume") {
 		if (state.status === "active") return { kind: "noop" };
 		if (state.status === "lost") return { kind: "resume" };
@@ -194,7 +227,7 @@ export const getOwnedBroadcast = Effect.fn("Broadcasts.getOwned")(function* (
 	if (session.ownerId !== ownerId) {
 		return yield* new Unauthorized({ message: "Unauthorized" });
 	}
-	return broadcast;
+	return yield* validateBroadcastState(broadcast);
 });
 
 export const getUnresolvedBroadcast = Effect.fn("Broadcasts.getUnresolved")(
@@ -222,7 +255,7 @@ export const getUnresolvedBroadcast = Effect.fn("Broadcasts.getUnresolved")(
 						new Error("Session has multiple unresolved Broadcasts"),
 					);
 				}
-				unresolved = broadcasts[0];
+				unresolved = yield* validateBroadcastState(broadcasts[0]);
 			}
 		}
 		return unresolved;
@@ -261,6 +294,7 @@ export const maybeSealBroadcast = Effect.fn("Broadcasts.maybeSeal")(function* (
 		() => ctx.db.get("broadcasts", broadcastId),
 		"Broadcasts.maybeSeal.get",
 	);
+	if (broadcast) yield* validateBroadcastState(broadcast);
 	if (
 		broadcast?.status !== "stopping" ||
 		broadcast.finalCommitOrdinal === undefined
@@ -294,6 +328,7 @@ export const finishCommitDrain = Effect.fn("Broadcasts.finishCommitDrain")(
 				new Error("Accepted commit references a missing Broadcast"),
 			);
 		}
+		yield* validateBroadcastState(broadcast);
 		if (broadcast.pendingCommitCount <= 0) {
 			return yield* Effect.die(
 				new Error("Broadcast pending commit count underflow"),
@@ -429,6 +464,9 @@ export const sendHeartbeat = Effect.fn("Broadcasts.heartbeat")(function* (
 		);
 		return null;
 	}
+	if (decision.kind === "invalid") {
+		return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
+	}
 	if (decision.kind !== "reschedule") return null;
 	yield* fromConvex(
 		() => ctx.db.patch(broadcastId, { lastHeartbeatAt }),
@@ -459,6 +497,9 @@ export const markBroadcastLost = Effect.fn("Broadcasts.markLost")(function* (
 			decision.delayMs,
 		);
 		return null;
+	}
+	if (decision.kind === "invalid") {
+		return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
 	}
 	if (decision.kind !== "markLost") return null;
 

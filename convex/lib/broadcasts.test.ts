@@ -84,6 +84,21 @@ describe("broadcast lifecycle policy", () => {
 			),
 		).toEqual({ kind: "markLost" });
 	});
+
+	test("defects on inconsistent persisted finalization state", () => {
+		expect(
+			classifyBroadcastTransition(
+				{ ...activeBroadcast, status: "stopping" as const },
+				{ kind: "stop", finalCommitOrdinal: 3 },
+			),
+		).toEqual({ kind: "invalid", reason: "invalid_state" });
+		expect(
+			classifyBroadcastTransition(
+				{ ...activeBroadcast, pendingCommitCount: -1 },
+				{ kind: "stop", finalCommitOrdinal: 3 },
+			),
+		).toEqual({ kind: "invalid", reason: "invalid_state" });
+	});
 });
 
 describe("broadcast projections", () => {
