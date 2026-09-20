@@ -499,6 +499,51 @@ describe("Convex-owned caption acceptance", () => {
 		).rejects.toThrow("Translated completion has no translation");
 	});
 
+	it("rejects a completion whose Workpool context names another commit", async () => {
+		const t = makeTest();
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+		const first = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "identity-first",
+			sourceText: "First",
+			sourceLanguage: "en",
+		});
+		const second = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 2,
+			commitId: "identity-second",
+			sourceText: "Second",
+			sourceLanguage: "en",
+		});
+		const [target] = await acceptedTargets(t, first.acceptedCommitId);
+		if (!target) throw new Error("Expected a translation target");
+		await t.run(async (ctx) => {
+			await ctx.db.patch(target._id, { workId: workId("identity-work") });
+		});
+
+		await expect(
+			operator.mutation(internal.captions.targetCompleted, {
+				workId: workId("identity-work"),
+				context: { acceptedCommitId: second.acceptedCommitId },
+				result: {
+					kind: "success",
+					returnValue: {
+						kind: "translated",
+						targetId: target._id,
+						targetLanguage: target.targetLanguage,
+						translation: "Wrong commit",
+					},
+				},
+			}),
+		).rejects.toThrow("Translation completion commit identity mismatch");
+	});
+
 	it("requeues a failed commit without changing its identity", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
@@ -532,6 +577,10 @@ describe("Convex-owned caption acceptance", () => {
 				},
 			},
 		});
+		const failedSegment = await t.run(async (ctx) =>
+			ctx.db.query("segments").first(),
+		);
+		if (!failedSegment) throw new Error("Expected a failed Segment");
 
 		const retried = await operator.mutation(api.captions.retryCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
@@ -544,6 +593,7 @@ describe("Convex-owned caption acceptance", () => {
 			failedTargetCount: 0,
 			segmentId: expect.any(String),
 		});
+		expect(retried.segmentId).toBe(failedSegment._id);
 		const pending = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
@@ -556,10 +606,36 @@ describe("Convex-owned caption acceptance", () => {
 		).toMatchObject({
 			page: [{ sourceText: "Retry me", status: "failed" }],
 		});
+		const [retryTarget] = await acceptedTargets(t, accepted.acceptedCommitId);
+		if (!retryTarget?.workId) throw new Error("Expected a retry Workpool job");
+		await operator.mutation(internal.captions.targetCompleted, {
+			workId: workId(retryTarget.workId),
+			context: { acceptedCommitId: accepted.acceptedCommitId },
+			result: {
+				kind: "success",
+				returnValue: {
+					kind: "translated",
+					targetId: retryTarget._id,
+					targetLanguage: retryTarget.targetLanguage,
+					translation: "Retried translation",
+				},
+			},
+		});
+		const recovered = await operator.query(api.captions.getOperatorCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+		expect(recovered).toMatchObject({
+			status: "translated",
+			segmentId: failedSegment._id,
+			translations: { ja: "Retried translation" },
+		});
 		expect(
-			(await acceptedTargets(t, accepted.acceptedCommitId))[0],
+			await operator.query(api.segments.listBySession, {
+				sessionId,
+				paginationOpts: { numItems: 10, cursor: null },
+			}),
 		).toMatchObject({
-			status: "pending",
+			page: [{ sourceText: "Retry me", status: "translated" }],
 		});
 	});
 
