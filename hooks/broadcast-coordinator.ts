@@ -6,10 +6,11 @@ import {
 	type CapturedCommit,
 	type CaptureEvent,
 	createCaptureBuffer,
+	createRejectedCaptureOwner,
 	type RejectedCapture,
+	type RejectedCaptureOwner,
 	rebaseCaptures,
 	removeCapture,
-	toRejectedCapture,
 } from "@/hooks/broadcast-capture";
 import {
 	acceptCaptionCommit,
@@ -88,8 +89,6 @@ const defaultTimers: BroadcastCoordinatorTimers = {
 	clearInterval: (id) => globalThis.clearInterval(id),
 };
 
-const rejectedBySession = new Map<string, readonly RejectedCapture[]>();
-
 function ignoreDisconnectTimeout(error: unknown): void {
 	if (error instanceof DisconnectTimeout) return;
 	throw error;
@@ -108,10 +107,12 @@ export function createBroadcastCoordinator({
 	onSnapshot,
 	onError,
 	timers = defaultTimers,
+	rejectedCaptureOwner = createRejectedCaptureOwner(),
 }: {
 	onSnapshot?: (snapshot: BroadcastCoordinatorSnapshot) => void;
 	onError?: (message: string) => void;
 	timers?: BroadcastCoordinatorTimers;
+	rejectedCaptureOwner?: RejectedCaptureOwner;
 } = {}) {
 	let adapters: BroadcastCoordinatorAdapters | null = null;
 	let sessionId: string | undefined;
@@ -132,6 +133,7 @@ export function createBroadcastCoordinator({
 	let commandError: unknown | null = null;
 	let interruptEventFiber: (() => void) | null = null;
 	let snapshot = emptySnapshot();
+	let unsubscribeRejectedCaptureOwner = () => {};
 
 	const commandGate = createBroadcastCommandGate();
 	const eventQueue = Effect.runSync(Queue.unbounded<CaptureEvent>());
@@ -146,9 +148,7 @@ export function createBroadcastCoordinator({
 		snapshot = {
 			activeBroadcastId: getActiveBroadcastId(),
 			optimisticCaptures: snapshot.optimisticCaptures,
-			rejectedCaptures: sessionId
-				? (rejectedBySession.get(sessionId) ?? [])
-				: [],
+			rejectedCaptures: sessionId ? rejectedCaptureOwner.read(sessionId) : [],
 			commandResult: {
 				waiting: commandWaiting,
 				error: commandError,
@@ -156,6 +156,11 @@ export function createBroadcastCoordinator({
 		};
 		onSnapshot?.(snapshot);
 	};
+	unsubscribeRejectedCaptureOwner = rejectedCaptureOwner.subscribe(
+		(changedSessionId) => {
+			if (!disposed && changedSessionId === sessionId) emit();
+		},
+	);
 
 	const updateHeartbeat = () => {
 		const activeBroadcastId = getActiveBroadcastId();
@@ -236,37 +241,18 @@ export function createBroadcastCoordinator({
 		captures: readonly CapturedCommit[],
 		reason: string,
 	) => {
-		if (!sessionId || captures.length === 0) return;
-		const previous = rejectedBySession.get(sessionId) ?? [];
-		const existingIds = new Set(previous.map((capture) => capture.commitId));
-		const additions = captures.filter(
-			(capture) => !existingIds.has(capture.commitId),
-		);
-		if (additions.length === 0) return;
-		rejectedBySession.set(sessionId, [
-			...previous,
-			...additions.map((capture) => toRejectedCapture(capture, reason)),
-		]);
-		emit();
+		if (!sessionId || captures.length === 0) return false;
+		return rejectedCaptureOwner.reject(sessionId, captures, reason);
 	};
 
 	const clearRejectedCapture = (commitId: string) => {
 		if (!sessionId) return;
-		const previous = rejectedBySession.get(sessionId);
-		if (!previous) return;
-		const remaining = previous.filter(
-			(capture) => capture.commitId !== commitId,
-		);
-		if (remaining.length === previous.length) return;
-		if (remaining.length === 0) rejectedBySession.delete(sessionId);
-		else rejectedBySession.set(sessionId, remaining);
-		emit();
+		rejectedCaptureOwner.remove(sessionId, commitId);
 	};
 
 	const clearRejectedCaptures = () => {
-		if (!sessionId || !rejectedBySession.has(sessionId)) return;
-		rejectedBySession.delete(sessionId);
-		emit();
+		if (!sessionId) return;
+		rejectedCaptureOwner.discardAll(sessionId);
 	};
 
 	const appendCaptureEvent = (event: CaptureEvent) => {
@@ -325,13 +311,15 @@ export function createBroadcastCoordinator({
 						removeCapture(captureBuffer, capture.commitId),
 						lastAcceptedOrdinal,
 					);
-					markRejected(
+					const retained = markRejected(
 						[capture],
 						`Could not accept caption: ${toBroadcastCommandError(error).message}`,
 					);
-					reportError?.(
-						"A caption could not be accepted. It remains available for export.",
-					);
+					if (retained) {
+						reportError?.(
+							"A caption could not be accepted. It remains available for export.",
+						);
+					}
 				}
 			}
 		})();
@@ -611,6 +599,7 @@ export function createBroadcastCoordinator({
 		eventDrainWaiters = [];
 		interruptEventFiber?.();
 		interruptEventFiber = null;
+		unsubscribeRejectedCaptureOwner();
 		void adapters?.disconnect().catch(ignoreDisconnectTimeout);
 	};
 

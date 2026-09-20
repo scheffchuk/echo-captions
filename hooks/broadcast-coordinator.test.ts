@@ -1,6 +1,10 @@
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
 import {
+	createRejectedCaptureOwner,
+	type RejectedCaptureOwner,
+} from "@/hooks/broadcast-capture";
+import {
 	type BroadcastActivation,
 	type BroadcastCoordinatorAdapters,
 	createBroadcastCoordinator,
@@ -65,6 +69,32 @@ function configureCoordinator(
 		recoverableBroadcastId: null,
 		adapters,
 	});
+}
+
+async function coordinatorWithRejectedCapture(
+	rejectedCaptureOwner: RejectedCaptureOwner,
+	sessionId: string,
+	commitId: string,
+) {
+	const coordinator = createBroadcastCoordinator({ rejectedCaptureOwner });
+	configureCoordinator(
+		coordinator,
+		sessionId,
+		makeAdapters({
+			acceptCommit: vi.fn(async () => {
+				throw new ConvexError({
+					code: "broadcast_conflict",
+					message: "Broadcast is no longer active",
+				});
+			}),
+		}),
+	);
+	await coordinator.run({ kind: "start" });
+	coordinator.offerCapture(capture(commitId));
+	await vi.waitFor(() => {
+		expect(coordinator.snapshot().rejectedCaptures).toHaveLength(1);
+	});
+	return coordinator;
 }
 
 describe("Broadcast coordinator", () => {
@@ -223,6 +253,172 @@ describe("Broadcast coordinator", () => {
 
 		expect(coordinator.snapshot().rejectedCaptures).toEqual([]);
 		coordinator.dispose();
+	});
+
+	it("keeps rejected captures available when the coordinator remounts for the same Session", async () => {
+		const rejectedCaptureOwner = createRejectedCaptureOwner();
+		const firstCoordinator = await coordinatorWithRejectedCapture(
+			rejectedCaptureOwner,
+			"session-remount",
+			"commit-remount",
+		);
+		firstCoordinator.dispose();
+
+		const remountedCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			remountedCoordinator,
+			"session-remount",
+			makeAdapters(),
+		);
+
+		expect(remountedCoordinator.snapshot().rejectedCaptures).toMatchObject([
+			{ commitId: "commit-remount" },
+		]);
+		remountedCoordinator.clearRejectedCaptures();
+		remountedCoordinator.dispose();
+	});
+
+	it("keeps a remounted coordinator in sync while the disposed coordinator settles a capture", async () => {
+		const rejectedCaptureOwner = createRejectedCaptureOwner();
+		const acceptance = deferred<void>();
+		const firstCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			firstCoordinator,
+			"session-in-flight-remount",
+			makeAdapters({ acceptCommit: vi.fn(() => acceptance.promise) }),
+		);
+		await firstCoordinator.run({ kind: "start" });
+		firstCoordinator.offerCapture(capture("commit-in-flight-remount"));
+		await vi.waitFor(() => {
+			expect(firstCoordinator.snapshot().optimisticCaptures).toHaveLength(1);
+		});
+
+		const remountedCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			remountedCoordinator,
+			"session-in-flight-remount",
+			makeAdapters(),
+		);
+		firstCoordinator.dispose();
+
+		expect(remountedCoordinator.snapshot().rejectedCaptures).toMatchObject([
+			{ commitId: "commit-in-flight-remount" },
+		]);
+		acceptance.resolve();
+		await vi.waitFor(() => {
+			expect(remountedCoordinator.snapshot().rejectedCaptures).toEqual([]);
+		});
+		remountedCoordinator.dispose();
+	});
+
+	it("does not restore an explicitly discarded capture after a disposed coordinator fails", async () => {
+		const rejectedCaptureOwner = createRejectedCaptureOwner();
+		const acceptance = deferred<void>();
+		const onError = vi.fn();
+		const firstCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+			onError,
+		});
+		configureCoordinator(
+			firstCoordinator,
+			"session-discard-in-flight",
+			makeAdapters({ acceptCommit: vi.fn(() => acceptance.promise) }),
+		);
+		await firstCoordinator.run({ kind: "start" });
+		firstCoordinator.offerCapture(capture("commit-discard-in-flight"));
+		await vi.waitFor(() => {
+			expect(firstCoordinator.snapshot().optimisticCaptures).toHaveLength(1);
+		});
+
+		const remountedCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			remountedCoordinator,
+			"session-discard-in-flight",
+			makeAdapters(),
+		);
+		firstCoordinator.dispose();
+		expect(remountedCoordinator.snapshot().rejectedCaptures).toHaveLength(1);
+		remountedCoordinator.clearRejectedCaptures();
+		expect(remountedCoordinator.snapshot().rejectedCaptures).toEqual([]);
+
+		acceptance.reject(
+			new ConvexError({
+				code: "broadcast_conflict",
+				message: "Broadcast is no longer active",
+			}),
+		);
+		await vi.waitFor(() => {
+			expect(firstCoordinator.snapshot().optimisticCaptures).toEqual([]);
+		});
+		expect(onError).not.toHaveBeenCalled();
+		expect(remountedCoordinator.snapshot().rejectedCaptures).toEqual([]);
+		remountedCoordinator.dispose();
+	});
+
+	it("isolates rejected captures by Session within one owner", async () => {
+		const rejectedCaptureOwner = createRejectedCaptureOwner();
+		const firstSessionCoordinator = await coordinatorWithRejectedCapture(
+			rejectedCaptureOwner,
+			"session-isolated-a",
+			"commit-isolated",
+		);
+		firstSessionCoordinator.dispose();
+
+		const secondSessionCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			secondSessionCoordinator,
+			"session-isolated-b",
+			makeAdapters(),
+		);
+
+		expect(secondSessionCoordinator.snapshot().rejectedCaptures).toEqual([]);
+		secondSessionCoordinator.dispose();
+
+		const restoredSessionCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner,
+		});
+		configureCoordinator(
+			restoredSessionCoordinator,
+			"session-isolated-a",
+			makeAdapters(),
+		);
+		expect(
+			restoredSessionCoordinator.snapshot().rejectedCaptures,
+		).toMatchObject([{ commitId: "commit-isolated" }]);
+		restoredSessionCoordinator.clearRejectedCaptures();
+		restoredSessionCoordinator.dispose();
+	});
+
+	it("does not leak rejected captures between independent owners", async () => {
+		const firstOwnerCoordinator = await coordinatorWithRejectedCapture(
+			createRejectedCaptureOwner(),
+			"session-owner-isolation",
+			"commit-first-owner",
+		);
+
+		const secondOwnerCoordinator = createBroadcastCoordinator({
+			rejectedCaptureOwner: createRejectedCaptureOwner(),
+		});
+		configureCoordinator(
+			secondOwnerCoordinator,
+			"session-owner-isolation",
+			makeAdapters(),
+		);
+
+		expect(secondOwnerCoordinator.snapshot().rejectedCaptures).toEqual([]);
+		firstOwnerCoordinator.clearRejectedCaptures();
+		firstOwnerCoordinator.dispose();
+		secondOwnerCoordinator.dispose();
 	});
 
 	it("rejects buffered captures when activation fails and disconnects realtime", async () => {

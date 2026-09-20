@@ -10,6 +10,7 @@ import {
 	type BroadcastLifecycleStatus,
 	createBroadcastCoordinator,
 } from "@/hooks/broadcast-coordinator";
+import { useRejectedCaptureOwner } from "@/hooks/rejected-capture-owner";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 
 export type BroadcastVoiceState = "idle" | "connecting" | "recording";
@@ -35,6 +36,7 @@ export function useBroadcastRecording({
 	recoverableBroadcastId?: Id<"broadcasts"> | null;
 	onError?: (message: string) => void;
 }) {
+	const rejectedCaptureOwner = useRejectedCaptureOwner();
 	const startBroadcast = useMutation(api.broadcasts.start);
 	const resumeBroadcast = useMutation(api.broadcasts.resume);
 	const heartbeat = useMutation(api.broadcasts.heartbeat);
@@ -45,7 +47,10 @@ export function useBroadcastRecording({
 		emptyCoordinatorSnapshot,
 	);
 	const [coordinator] = useState(() =>
-		createBroadcastCoordinator({ onSnapshot: setCoordinatorSnapshot }),
+		createBroadcastCoordinator({
+			onSnapshot: setCoordinatorSnapshot,
+			rejectedCaptureOwner,
+		}),
 	);
 
 	const offerCapture = useCallback(
