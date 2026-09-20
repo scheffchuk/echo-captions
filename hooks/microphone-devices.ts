@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Queue, Schema, Stream } from "effect";
+import { Effect, Option, Queue, Schema, Stream } from "effect";
 
 export type AudioDevice = Readonly<{
 	deviceId: string;
@@ -244,17 +244,4 @@ export function getBrowserMediaDevices(): MediaDevicesSource | undefined {
 
 export function unsupportedMicrophoneError() {
 	return new MicrophoneUnsupported({ message: unsupportedMessage });
-}
-
-export function errorFromAsyncResult<E>(
-	result: import("effect/unstable/reactivity/AsyncResult").AsyncResult<
-		unknown,
-		E
-	>,
-) {
-	if (result?._tag !== "Failure") return undefined;
-	const failure = Option.getOrUndefined(Cause.findErrorOption(result.cause));
-	if (failure !== undefined) return failure;
-	if (Cause.hasInterruptsOnly(result.cause)) return undefined;
-	throw Cause.squash(result.cause);
 }

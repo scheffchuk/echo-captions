@@ -1,11 +1,8 @@
 "use client";
 
-import { useAtom } from "@effect/atom-react";
-import { Effect, Exit, Option, Stream } from "effect";
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import * as Atom from "effect/unstable/reactivity/Atom";
+import { Cause, Effect, Exit, Option, Stream } from "effect";
 import { Check, ChevronsUpDown, Mic } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -15,7 +12,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
 	createMicrophoneDeviceStream,
-	errorFromAsyncResult,
 	getBrowserMediaDevices,
 	type MicrophoneDeviceSnapshot,
 	type MicrophoneError,
@@ -127,57 +123,103 @@ export function MicSelector({
 export function useAudioDevices(onError?: (message: string) => void) {
 	const mediaDevices = useMemo(getBrowserMediaDevices, []);
 	const unsupported = useMemo(unsupportedMicrophoneError, []);
-	const deviceStreamAtom = useMemo(
-		() =>
-			Atom.fn<never, MicrophoneDeviceSnapshot, void>(() =>
-				mediaDevices
-					? createMicrophoneDeviceStream(mediaDevices)
-					: Stream.succeed<MicrophoneDeviceSnapshot>({
-							status: "error",
-							error: unsupported,
-						}),
-			),
-		[mediaDevices, unsupported],
-	);
-	const permissionAtom = useMemo(
-		() =>
-			Atom.fn<MicrophoneError, void, void>(() =>
-				mediaDevices
-					? requestMicrophonePermission(mediaDevices).pipe(Effect.asVoid)
-					: Effect.fail(unsupported),
-			),
-		[mediaDevices, unsupported],
-	);
-	const [deviceState, startDeviceStream] = useAtom(deviceStreamAtom);
-	const [permissionState, requestPermission] = useAtom(permissionAtom, {
-		mode: "promiseExit",
-	});
+	const [snapshot, setSnapshot] = useState<MicrophoneDeviceSnapshot>();
+	const [permissionError, setPermissionError] =
+		useState<MicrophoneError | null>(null);
+	const [permissionWaiting, setPermissionWaiting] = useState(false);
+	const [hasPermission, setHasPermission] = useState(false);
+	const [fatalError, setFatalError] = useState<{ cause: unknown } | null>(null);
+	const lifecycleGeneration = useRef(0);
+	const permissionRequests = useRef(new Set<AbortController>());
 
 	useEffect(() => {
-		startDeviceStream(undefined);
-	}, [startDeviceStream]);
+		const streamController = new AbortController();
+		lifecycleGeneration.current += 1;
+		const deviceStream = mediaDevices
+			? createMicrophoneDeviceStream(mediaDevices)
+			: Stream.succeed<MicrophoneDeviceSnapshot>({
+					status: "error",
+					error: unsupported,
+				});
+		const consumeDevices = Stream.runForEach(deviceStream, (nextSnapshot) =>
+			Effect.sync(() => {
+				if (!streamController.signal.aborted) setSnapshot(nextSnapshot);
+			}),
+		);
 
-	const deviceEffectError = errorFromAsyncResult(deviceState);
-	if (deviceEffectError !== undefined) throw deviceEffectError;
-	const permissionError = errorFromAsyncResult(permissionState);
-	const snapshot = Option.getOrUndefined(AsyncResult.value(deviceState));
+		void Effect.runPromiseExit(consumeDevices, {
+			signal: streamController.signal,
+		}).then((exit) => {
+			if (
+				streamController.signal.aborted ||
+				Exit.isSuccess(exit) ||
+				Cause.hasInterruptsOnly(exit.cause)
+			) {
+				return;
+			}
+			setFatalError({ cause: Cause.squash(exit.cause) });
+		});
+
+		return () => {
+			lifecycleGeneration.current += 1;
+			streamController.abort();
+			for (const controller of permissionRequests.current) controller.abort();
+			permissionRequests.current.clear();
+		};
+	}, [mediaDevices, unsupported]);
+
+	if (fatalError) throw fatalError.cause;
+
 	const devices = snapshot?.status === "ready" ? snapshot.devices : [];
 	const enumerationError =
 		snapshot?.status === "error" ? snapshot.error : undefined;
 	const typedError = permissionError ?? enumerationError ?? null;
 	const error = typedError?.message ?? null;
-	const loading = snapshot === undefined || permissionState.waiting;
-	const hasPermission = AsyncResult.isSuccess(permissionState);
+	const loading = snapshot === undefined || permissionWaiting;
 
 	useEffect(() => {
 		if (typedError) onError?.(typedError.message);
 	}, [onError, typedError]);
 
 	const requestMicrophoneAccess = useCallback(async () => {
-		const result = await requestPermission(undefined);
-		if (Exit.isSuccess(result)) startDeviceStream(undefined);
+		const generation = lifecycleGeneration.current;
+		const controller = new AbortController();
+		permissionRequests.current.add(controller);
+		setPermissionWaiting(true);
+		setPermissionError(null);
+		const request = mediaDevices
+			? requestMicrophonePermission(mediaDevices)
+			: Effect.fail(unsupported);
+		const result = await Effect.runPromiseExit(request, {
+			signal: controller.signal,
+		});
+		permissionRequests.current.delete(controller);
+
+		if (
+			controller.signal.aborted ||
+			generation !== lifecycleGeneration.current
+		) {
+			return result;
+		}
+
+		setPermissionWaiting(false);
+		if (Exit.isSuccess(result)) {
+			setHasPermission(true);
+			setSnapshot({ status: "ready", devices: result.value });
+			return result;
+		}
+
+		const typedFailure = Option.getOrUndefined(
+			Cause.findErrorOption(result.cause),
+		);
+		if (typedFailure !== undefined) {
+			setHasPermission(false);
+			setPermissionError(typedFailure);
+		} else if (!Cause.hasInterruptsOnly(result.cause)) {
+			setFatalError({ cause: Cause.squash(result.cause) });
+		}
 		return result;
-	}, [requestPermission, startDeviceStream]);
+	}, [mediaDevices, unsupported]);
 
 	return {
 		devices,
@@ -185,8 +227,6 @@ export function useAudioDevices(onError?: (message: string) => void) {
 		error,
 		errorCause: typedError,
 		hasPermission,
-		deviceState,
-		permissionState,
 		requestMicrophoneAccess,
 	};
 }

@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { RegistryProvider } from "@effect/atom-react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -78,10 +77,6 @@ function DeviceState({ onError }: { onError?: (message: string) => void }) {
 	);
 }
 
-function renderWithRegistry(element: React.ReactNode) {
-	return render(<RegistryProvider>{element}</RegistryProvider>);
-}
-
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
@@ -91,7 +86,7 @@ describe("microphone selector", () => {
 	it("enumerates initially, follows additions and removals, and releases its listener", async () => {
 		const source = createSource([device("mic-1", "Desk Mic")]);
 		installMediaDevices(source);
-		const view = renderWithRegistry(<DeviceState />);
+		const view = render(<DeviceState />);
 
 		await waitFor(() =>
 			expect(screen.getByTestId("devices")).toHaveTextContent("mic-1"),
@@ -127,7 +122,7 @@ describe("microphone selector", () => {
 		);
 		installMediaDevices(source);
 		const onError = vi.fn();
-		renderWithRegistry(<DeviceState onError={onError} />);
+		render(<DeviceState onError={onError} />);
 
 		await waitFor(() =>
 			expect(screen.getByTestId("loading")).toHaveTextContent("false"),
@@ -149,7 +144,7 @@ describe("microphone selector", () => {
 	it("grants permission once, stops the temporary track, and keeps one listener", async () => {
 		const source = createSource([device("mic-1", "Desk Mic")]);
 		installMediaDevices(source);
-		renderWithRegistry(<DeviceState />);
+		render(<DeviceState />);
 
 		await waitFor(() =>
 			expect(screen.getByTestId("loading")).toHaveTextContent("false"),
@@ -177,7 +172,7 @@ describe("microphone selector", () => {
 			);
 		}
 
-		renderWithRegistry(<ControlledSelector />);
+		render(<ControlledSelector />);
 
 		await waitFor(() =>
 			expect(screen.getByTestId("selected")).toHaveTextContent("mic-1"),
@@ -202,7 +197,7 @@ describe("microphone selector", () => {
 			}),
 		);
 		installMediaDevices(source);
-		const view = renderWithRegistry(<DeviceState />);
+		const view = render(<DeviceState />);
 
 		await waitFor(() =>
 			expect(screen.getByTestId("loading")).toHaveTextContent("false"),

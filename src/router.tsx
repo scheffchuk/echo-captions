@@ -1,5 +1,4 @@
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { RegistryProvider } from "@effect/atom-react";
 import { createRouter } from "@tanstack/react-router";
 import { ConvexReactClient } from "convex/react";
 import { getConvexUrl } from "./lib/env";
@@ -15,15 +14,13 @@ export function getRouter() {
 		scrollRestoration: true,
 		defaultPreload: "intent",
 		Wrap: ({ children }) => (
-			<RegistryProvider>
-				<ConvexAuthProvider
-					client={convex}
-					storage={storage}
-					storageNamespace="echo"
-				>
-					{children}
-				</ConvexAuthProvider>
-			</RegistryProvider>
+			<ConvexAuthProvider
+				client={convex}
+				storage={storage}
+				storageNamespace="echo"
+			>
+				{children}
+			</ConvexAuthProvider>
 		),
 	});
 
