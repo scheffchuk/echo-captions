@@ -1,6 +1,7 @@
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
 import {
+	type BroadcastActivation,
 	type BroadcastCoordinatorAdapters,
 	createBroadcastCoordinator,
 } from "@/hooks/broadcast-coordinator";
@@ -56,11 +57,7 @@ async function settle() {
 
 describe("Broadcast coordinator", () => {
 	it("accepts captures that arrive while Broadcast activation is pending in order", async () => {
-		const activation = deferred<{
-			broadcastId: string;
-			sequence: number;
-			lastCommitOrdinal: number;
-		}>();
+		const activation = deferred<BroadcastActivation>();
 		const acceptCommit = vi.fn<BroadcastCoordinatorAdapters["acceptCommit"]>(
 			async () => undefined,
 		);
@@ -234,11 +231,7 @@ describe("Broadcast coordinator", () => {
 	});
 
 	it("rejects buffered captures when activation fails and disconnects realtime", async () => {
-		const activation = deferred<{
-			broadcastId: string;
-			sequence: number;
-			lastCommitOrdinal: number;
-		}>();
+		const activation = deferred<BroadcastActivation>();
 		const adapters = makeAdapters({
 			start: vi.fn(() => activation.promise),
 		});
@@ -293,6 +286,59 @@ describe("Broadcast coordinator", () => {
 		coordinator.dispose();
 	});
 
+	it("does not disconnect twice when pagehide arrives during stop", async () => {
+		const disconnecting = deferred<void>();
+		const adapters = makeAdapters({
+			disconnect: vi.fn(() => disconnecting.promise),
+		});
+		const coordinator = createBroadcastCoordinator();
+		coordinator.update({
+			sessionId: "session-pagehide-stop",
+			recoverableBroadcastId: null,
+			broadcastStatus: "active",
+			adapters,
+		});
+		await coordinator.run({ kind: "start" });
+
+		const stopping = coordinator.run({ kind: "stop" });
+		await vi.waitFor(() => expect(adapters.disconnect).toHaveBeenCalledOnce());
+		coordinator.handlePagehide();
+		expect(adapters.disconnect).toHaveBeenCalledOnce();
+		disconnecting.resolve();
+		await stopping;
+		coordinator.dispose();
+	});
+
+	it("stops a partially activated Broadcast when realtime fails while draining", async () => {
+		const accepting = deferred<void>();
+		const adapters = makeAdapters({
+			acceptCommit: vi.fn(() => accepting.promise),
+		});
+		const coordinator = createBroadcastCoordinator();
+		coordinator.update({
+			sessionId: "session-realtime-activation-failure",
+			recoverableBroadcastId: null,
+			broadcastStatus: "active",
+			adapters,
+		});
+		coordinator.offerCapture(capture("commit-during-activation"));
+
+		const starting = coordinator.run({ kind: "start" });
+		await vi.waitFor(() =>
+			expect(adapters.acceptCommit).toHaveBeenCalledOnce(),
+		);
+		coordinator.handleRealtimeError("Realtime transcription failed");
+		accepting.resolve();
+
+		await expect(starting).rejects.toMatchObject({
+			message: "Realtime transcription failed during activation",
+		});
+		expect(adapters.stop).toHaveBeenCalledWith({
+			broadcastId: "broadcast-1",
+		});
+		coordinator.dispose();
+	});
+
 	it("rejects queued captures and disconnects when the Broadcast scope is disposed", async () => {
 		const adapters = makeAdapters();
 		const coordinator = createBroadcastCoordinator();
@@ -335,7 +381,6 @@ describe("Broadcast coordinator", () => {
 		coordinator.update({
 			sessionId: "session-heartbeat",
 			recoverableBroadcastId: null,
-			broadcastStatus: "active",
 			adapters,
 		});
 		await coordinator.run({ kind: "start" });

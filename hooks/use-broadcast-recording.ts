@@ -63,7 +63,6 @@ export function useBroadcastRecording({
 		coordinator.update({
 			sessionId,
 			recoverableBroadcastId,
-			broadcastStatus,
 			onError,
 			adapters: {
 				connect: realtime.connect,
@@ -90,7 +89,6 @@ export function useBroadcastRecording({
 		});
 	}, [
 		acceptCommit,
-		broadcastStatus,
 		coordinator,
 		heartbeat,
 		onError,
