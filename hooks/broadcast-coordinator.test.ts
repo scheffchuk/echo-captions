@@ -55,6 +55,18 @@ async function settle() {
 	await Promise.resolve();
 }
 
+function configureCoordinator(
+	coordinator: ReturnType<typeof createBroadcastCoordinator>,
+	sessionId: string,
+	adapters: BroadcastCoordinatorAdapters,
+) {
+	coordinator.update({
+		sessionId,
+		recoverableBroadcastId: null,
+		adapters,
+	});
+}
+
 describe("Broadcast coordinator", () => {
 	it("accepts captures that arrive while Broadcast activation is pending in order", async () => {
 		const activation = deferred<BroadcastActivation>();
@@ -66,12 +78,7 @@ describe("Broadcast coordinator", () => {
 			acceptCommit,
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-1",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-1", adapters);
 
 		const command = coordinator.run({ kind: "start" });
 		await Promise.resolve();
@@ -109,12 +116,7 @@ describe("Broadcast coordinator", () => {
 				.mockResolvedValueOnce(4),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-generations",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-generations", adapters);
 
 		await coordinator.run({ kind: "start" });
 		await coordinator.run({ kind: "stop" });
@@ -141,12 +143,7 @@ describe("Broadcast coordinator", () => {
 			acceptCommit,
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-disconnect",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-disconnect", adapters);
 		await coordinator.run({ kind: "start" });
 
 		coordinator.offerCapture(capture("commit-1"));
@@ -178,12 +175,11 @@ describe("Broadcast coordinator", () => {
 			)
 			.mockResolvedValue(undefined);
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-retry",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters: makeAdapters({ acceptCommit }),
-		});
+		configureCoordinator(
+			coordinator,
+			"session-retry",
+			makeAdapters({ acceptCommit }),
+		);
 		await coordinator.run({ kind: "start" });
 
 		coordinator.offerCapture(capture("commit-failed"));
@@ -212,12 +208,11 @@ describe("Broadcast coordinator", () => {
 			},
 		);
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-discard",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters: makeAdapters({ acceptCommit }),
-		});
+		configureCoordinator(
+			coordinator,
+			"session-discard",
+			makeAdapters({ acceptCommit }),
+		);
 		await coordinator.run({ kind: "start" });
 
 		coordinator.offerCapture(capture("commit-discard"));
@@ -236,12 +231,7 @@ describe("Broadcast coordinator", () => {
 			start: vi.fn(() => activation.promise),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-activation-failure",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-activation-failure", adapters);
 
 		const starting = coordinator.run({ kind: "start" });
 		await settle();
@@ -269,12 +259,7 @@ describe("Broadcast coordinator", () => {
 			stop: vi.fn(() => stopping.promise),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-pagehide",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-pagehide", adapters);
 		await coordinator.run({ kind: "start" });
 
 		coordinator.handlePagehide();
@@ -292,12 +277,7 @@ describe("Broadcast coordinator", () => {
 			disconnect: vi.fn(() => disconnecting.promise),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-pagehide-stop",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-pagehide-stop", adapters);
 		await coordinator.run({ kind: "start" });
 
 		const stopping = coordinator.run({ kind: "stop" });
@@ -315,12 +295,11 @@ describe("Broadcast coordinator", () => {
 			acceptCommit: vi.fn(() => accepting.promise),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-realtime-activation-failure",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
+		configureCoordinator(
+			coordinator,
+			"session-realtime-activation-failure",
 			adapters,
-		});
+		);
 		coordinator.offerCapture(capture("commit-during-activation"));
 
 		const starting = coordinator.run({ kind: "start" });
@@ -342,12 +321,7 @@ describe("Broadcast coordinator", () => {
 	it("rejects queued captures and disconnects when the Broadcast scope is disposed", async () => {
 		const adapters = makeAdapters();
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-dispose",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-dispose", adapters);
 		coordinator.offerCapture(capture("commit-unmounted", 0));
 		coordinator.dispose();
 
@@ -378,11 +352,7 @@ describe("Broadcast coordinator", () => {
 				clearInterval: vi.fn(),
 			},
 		});
-		coordinator.update({
-			sessionId: "session-heartbeat",
-			recoverableBroadcastId: null,
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-heartbeat", adapters);
 		await coordinator.run({ kind: "start" });
 		heartbeat();
 		await settle();
@@ -397,12 +367,7 @@ describe("Broadcast coordinator", () => {
 			connect: vi.fn(() => starting.promise),
 		});
 		const coordinator = createBroadcastCoordinator();
-		coordinator.update({
-			sessionId: "session-command-conflict",
-			recoverableBroadcastId: null,
-			broadcastStatus: "active",
-			adapters,
-		});
+		configureCoordinator(coordinator, "session-command-conflict", adapters);
 
 		const first = coordinator.run({ kind: "start" });
 		await expect(coordinator.run({ kind: "start" })).rejects.toMatchObject({

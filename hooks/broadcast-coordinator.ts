@@ -14,13 +14,11 @@ import {
 import {
 	acceptCaptionCommit,
 	type BroadcastCommand,
-	BroadcastCommandConflict,
 	BroadcastCommandError,
 	type BroadcastCommandResult,
 	createBroadcastCommandGate,
 	DisconnectTimeout,
 	ignorePresentedBroadcastError,
-	RealtimeTranscriptionError,
 	toBroadcastCommandError,
 } from "@/hooks/broadcast-model";
 import type { OperatorCommitProjection } from "@/lib/operator-commit-feed";
@@ -76,16 +74,12 @@ export type BroadcastCoordinatorSnapshot = {
 	};
 };
 
-export type BroadcastCoordinator = ReturnType<
-	typeof createBroadcastCoordinator
->;
-
 type CoordinatorLifecycle =
 	| { tag: "idle" }
 	| { tag: "starting" }
 	| { tag: "active"; activation: BroadcastActivation }
 	| { tag: "stopping"; activation: BroadcastActivation }
-	| { tag: "sealed"; lastCommitOrdinal: number };
+	| { tag: "sealed" };
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
 
@@ -95,14 +89,6 @@ const defaultTimers: BroadcastCoordinatorTimers = {
 };
 
 const rejectedBySession = new Map<string, readonly RejectedCapture[]>();
-
-function commandMessage(error: unknown) {
-	if (error instanceof DisconnectTimeout) return error.message;
-	if (error instanceof BroadcastCommandConflict) return error.message;
-	if (error instanceof BroadcastCommandError) return error.message;
-	if (error instanceof RealtimeTranscriptionError) return error.message;
-	throw error;
-}
 
 function ignoreDisconnectTimeout(error: unknown): void {
 	if (error instanceof DisconnectTimeout) return;
@@ -116,10 +102,6 @@ function emptySnapshot(): BroadcastCoordinatorSnapshot {
 		rejectedCaptures: [],
 		commandResult: { waiting: false, error: null },
 	};
-}
-
-function initialLifecycle(): CoordinatorLifecycle {
-	return { tag: "idle" };
 }
 
 export function createBroadcastCoordinator({
@@ -136,7 +118,7 @@ export function createBroadcastCoordinator({
 	let recoverableBroadcastId: string | null | undefined;
 	let reportError = onError;
 	let disposed = false;
-	let lifecycle = initialLifecycle();
+	let lifecycle: CoordinatorLifecycle = { tag: "idle" };
 	let realtimeFailed = false;
 	let lastAcceptedOrdinal = 0;
 	let captureBuffer: CaptureBuffer = createCaptureBuffer();
@@ -201,17 +183,14 @@ export function createBroadcastCoordinator({
 	};
 
 	const update = (input: {
-		sessionId?: string;
-		recoverableBroadcastId?: string | null;
-		broadcastStatus?: BroadcastLifecycleStatus;
-		adapters?: BroadcastCoordinatorAdapters;
+		sessionId: string | undefined;
+		recoverableBroadcastId: string | null | undefined;
+		adapters: BroadcastCoordinatorAdapters;
 		onError?: (message: string) => void;
 	}) => {
-		if ("sessionId" in input) sessionId = input.sessionId;
-		if ("recoverableBroadcastId" in input) {
-			recoverableBroadcastId = input.recoverableBroadcastId;
-		}
-		if (input.adapters) adapters = input.adapters;
+		sessionId = input.sessionId;
+		recoverableBroadcastId = input.recoverableBroadcastId;
+		adapters = input.adapters;
 		if ("onError" in input) reportError = input.onError;
 		updateHeartbeat();
 		emit();
@@ -348,7 +327,7 @@ export function createBroadcastCoordinator({
 					);
 					markRejected(
 						[capture],
-						`Could not accept caption: ${commandMessage(error)}`,
+						`Could not accept caption: ${toBroadcastCommandError(error).message}`,
 					);
 					reportError?.(
 						"A caption could not be accepted. It remains available for export.",
@@ -406,9 +385,7 @@ export function createBroadcastCoordinator({
 
 	const clearActiveBroadcast = (lastCommitOrdinal?: number) => {
 		lifecycle =
-			lastCommitOrdinal === undefined
-				? { tag: "idle" }
-				: { tag: "sealed", lastCommitOrdinal };
+			lastCommitOrdinal === undefined ? { tag: "idle" } : { tag: "sealed" };
 		pagehideRequested = false;
 		if (lastCommitOrdinal !== undefined) {
 			lastAcceptedOrdinal = lastCommitOrdinal;
@@ -474,20 +451,12 @@ export function createBroadcastCoordinator({
 		updateHeartbeat();
 		emit();
 
-		if (realtimeFailed) {
-			yield* Effect.tryPromise({
-				try: () =>
-					currentAdapters.stop({ broadcastId: activation.broadcastId }),
-				catch: toBroadcastCommandError,
-			});
-			clearActiveBroadcast();
-			return yield* new BroadcastCommandError({
-				message: "Realtime transcription failed during activation",
-			});
+		let activationFailed = realtimeFailed;
+		if (!activationFailed) {
+			yield* Effect.promise(drainCaptures);
+			activationFailed = realtimeFailed;
 		}
-
-		yield* Effect.promise(drainCaptures);
-		if (realtimeFailed) {
+		if (activationFailed) {
 			yield* Effect.tryPromise({
 				try: () =>
 					currentAdapters.stop({ broadcastId: activation.broadcastId }),
@@ -606,13 +575,6 @@ export function createBroadcastCoordinator({
 		clearActiveBroadcast();
 	};
 
-	const offerCapture = (event: CaptureEvent) => {
-		if (disposed) return;
-		ensureEventFiber();
-		pendingEventCount += 1;
-		Queue.offerUnsafe(eventQueue, event);
-	};
-
 	const ensureEventFiber = () => {
 		if (interruptEventFiber || disposed) return;
 		const fiber = Effect.runFork(
@@ -628,6 +590,13 @@ export function createBroadcastCoordinator({
 			),
 		);
 		interruptEventFiber = () => fiber.interruptUnsafe();
+	};
+
+	const offerCapture = (event: CaptureEvent) => {
+		if (disposed) return;
+		ensureEventFiber();
+		pendingEventCount += 1;
+		Queue.offerUnsafe(eventQueue, event);
 	};
 
 	const dispose = () => {
