@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { runConvex } from "../effect/run";
-import { maybeSealBroadcast } from "./broadcasts";
+import { finishCommitDrain } from "./broadcasts";
 import { CAPTION_TARGET_RETRY_BEHAVIOR } from "./captionRetry";
 import {
 	enqueueCaptionTargets,
@@ -175,17 +175,9 @@ async function finishAcceptedCommit(
 	decrementPendingCount: boolean,
 ) {
 	if (decrementPendingCount) {
-		const broadcast = await ctx.db.get("broadcasts", commit.broadcastId);
-		if (!broadcast) {
-			throw new Error("Accepted commit references a missing Broadcast");
-		}
-		if (broadcast.pendingCommitCount <= 0) {
-			throw new Error("Broadcast pending commit count underflow");
-		}
-		await ctx.db.patch(broadcast._id, {
-			pendingCommitCount: broadcast.pendingCommitCount - 1,
-		});
-		await runConvex(maybeSealBroadcast(ctx, broadcast._id).pipe(Effect.orDie));
+		await runConvex(
+			finishCommitDrain(ctx, commit.broadcastId).pipe(Effect.orDie),
+		);
 	}
 	await scheduleRetryDispatch(ctx, 0);
 }

@@ -13,7 +13,10 @@ import {
 import { exhaustPublicErrors, fromConvex } from "./effect/convex";
 import { runConvex } from "./effect/run";
 import { authErrorCodes, getCurrentOperatorId, getOperator } from "./lib/auth";
-import { getUnresolvedBroadcast } from "./lib/broadcasts";
+import {
+	getBroadcastProjection,
+	getUnresolvedBroadcast,
+} from "./lib/broadcasts";
 import {
 	computeAudienceLanguages,
 	languageErrorCodes,
@@ -152,18 +155,6 @@ const nextMappingRevision = Effect.fn("Sessions.nextMappingRevision")(
 	},
 );
 
-function toActiveBroadcastView(broadcast: Doc<"broadcasts"> | null) {
-	return broadcast
-		? {
-				_id: broadcast._id,
-				sequence: broadcast.sequence,
-				status: broadcast.status,
-				lastCommitOrdinal: broadcast.lastCommitOrdinal,
-				finalCommitOrdinal: broadcast.finalCommitOrdinal,
-			}
-		: null;
-}
-
 const createSession = Effect.fn("Sessions.create")(function* (
 	ctx: MutationCtx,
 	args: { title: string } & EventFields,
@@ -236,15 +227,10 @@ const getPublicBySlug = Effect.fn("Sessions.getBySlug")(function* (
 		"Sessions.getBySlug",
 	);
 	if (!session || session.deletionRequestedAt !== undefined) return null;
-	const activeBroadcast = yield* fromConvex(
-		() =>
-			ctx.db
-				.query("broadcasts")
-				.withIndex("by_session_id_and_status", (q) =>
-					q.eq("sessionId", session._id).eq("status", "active"),
-				)
-				.unique(),
-		"Sessions.getBySlug.activeBroadcast",
+	const broadcastProjection = yield* getBroadcastProjection(
+		ctx,
+		session._id,
+		"public",
 	);
 	return {
 		_id: session._id,
@@ -253,39 +239,42 @@ const getPublicBySlug = Effect.fn("Sessions.getBySlug")(function* (
 		audienceLanguages: normalizeLanguageList(session.audienceLanguages),
 		description: session.description,
 		eventDate: session.eventDate,
-		isLive: activeBroadcast !== null,
-		activeBroadcast: toActiveBroadcastView(activeBroadcast),
+		...broadcastProjection,
 	};
 });
 
-async function addLiveState(ctx: QueryCtx, session: Doc<"sessions">) {
+const addLiveState = Effect.fn("Sessions.addLiveState")(function* (
+	ctx: QueryCtx,
+	session: Doc<"sessions">,
+) {
 	let translationMappings: Doc<"translationMappingRevisions">["mappings"] = [];
 	if (session.translationMappingRevisionId) {
-		const mappingRevision = await ctx.db.get(
-			"translationMappingRevisions",
-			session.translationMappingRevisionId,
+		const mappingRevision = yield* fromConvex(
+			() =>
+				ctx.db.get(
+					"translationMappingRevisions",
+					session.translationMappingRevisionId as Id<"translationMappingRevisions">,
+				),
+			"Sessions.addLiveState.mappingRevision",
 		);
 		if (!mappingRevision || mappingRevision.sessionId !== session._id) {
-			throw new Error("Session mapping revision is unavailable");
+			return yield* Effect.die(
+				new Error("Session mapping revision is unavailable"),
+			);
 		}
 		translationMappings = mappingRevision.mappings;
 	}
-	const latestBroadcast = await ctx.db
-		.query("broadcasts")
-		.withIndex("by_session_id_and_sequence", (q) =>
-			q.eq("sessionId", session._id),
-		)
-		.order("desc")
-		.first();
-	const activeBroadcast =
-		latestBroadcast?.status === "sealed" ? null : (latestBroadcast ?? null);
+	const broadcastProjection = yield* getBroadcastProjection(
+		ctx,
+		session._id,
+		"owner",
+	);
 	return {
 		...session,
 		translationMappings,
-		isLive: activeBroadcast?.status === "active",
-		activeBroadcast: toActiveBroadcastView(activeBroadcast),
+		...broadcastProjection,
 	};
-}
+});
 
 const patchDescription = Effect.fn("Sessions.updateDescription")(function* (
 	ctx: MutationCtx,
@@ -699,7 +688,9 @@ export const listMine = query({
 			.order("desc")
 			.collect();
 		return await Promise.all(
-			sessions.map((session) => addLiveState(ctx, session)),
+			sessions.map((session) =>
+				runConvex(addLiveState(ctx, session).pipe(Effect.orDie)),
+			),
 		);
 	},
 });
@@ -724,7 +715,7 @@ export const getMineBySlug = query({
 			.withIndex("by_slug", (q) => q.eq("slug", args.slug))
 			.unique();
 		if (!session || session.ownerId !== ownerId) return null;
-		return await addLiveState(ctx, session);
+		return await runConvex(addLiveState(ctx, session).pipe(Effect.orDie));
 	},
 });
 
