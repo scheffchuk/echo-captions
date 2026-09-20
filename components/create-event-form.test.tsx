@@ -140,6 +140,19 @@ describe("CreateEventForm", () => {
 		expect(screen.getByRole("textbox", { name: "Event Name" })).toHaveValue("");
 	});
 
+	it("rejects a partially filled mapping instead of silently dropping it", async () => {
+		const user = await openForm();
+		await goToLanguages(user);
+		await user.click(screen.getByRole("button", { name: "Add mapping" }));
+		await user.type(screen.getByPlaceholderText("e.g. shici"), "Echo");
+		await user.click(screen.getByRole("button", { name: "Create event" }));
+
+		expect(
+			screen.getByText("Complete this mapping or remove the row."),
+		).toBeInTheDocument();
+		expect(mocks.createSession).not.toHaveBeenCalled();
+	});
+
 	it("preserves the untitled fallback for a whitespace-only event name", async () => {
 		const user = await openForm();
 		await user.type(screen.getByRole("textbox", { name: "Event Name" }), "   ");

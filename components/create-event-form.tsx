@@ -57,6 +57,12 @@ import {
 	MAX_SPOKEN_LANGUAGES,
 } from "@/lib/languages";
 import { cn } from "@/lib/utils";
+import {
+	createTranslationMappingDraft,
+	type TranslationMappingDraftIssueCode,
+	toCreateInput,
+	validateTranslationMappingDraft,
+} from "@/src/lib/translationMappingDraft";
 
 const eventNameSchema = Schema.String.pipe(
 	Schema.check(Schema.isNonEmpty({ message: "Event name is required" })),
@@ -106,8 +112,22 @@ const DEFAULT_FORM_VALUES: FormValues = {
 	translationMappings: [],
 };
 
+class TranslationMappingInputError extends Error {}
+
 function createSessionInput(values: FormValues) {
 	const decoded = Schema.decodeUnknownSync(formSchema)(values);
+	const audienceCodes = Array.from(
+		new Set([...decoded.spokenLanguages, ...decoded.audienceLanguagesExtra]),
+	);
+	const mappingInput = toCreateInput(
+		createTranslationMappingDraft({ rows: decoded.translationMappings }),
+		audienceCodes,
+	);
+	if (!mappingInput.ok) {
+		throw new TranslationMappingInputError(
+			mappingInput.issues.map(mappingIssueMessage).join(" "),
+		);
+	}
 
 	return {
 		title: decoded.eventName.trim() || "Untitled",
@@ -115,17 +135,29 @@ function createSessionInput(values: FormValues) {
 		eventDate: decoded.eventDate?.getTime(),
 		spokenLanguages: [...decoded.spokenLanguages],
 		audienceLanguagesExtra: [...decoded.audienceLanguagesExtra],
-		translationMappings: decoded.translationMappings
-			.filter(
-				(mapping) =>
-					mapping.term && mapping.targetLanguage && mapping.translation,
-			)
-			.map(({ term, targetLanguage, translation }) => ({
-				term,
-				targetLanguage,
-				translation,
-			})),
+		translationMappings: mappingInput.mappings,
 	};
+}
+
+function mappingIssueMessage(issue: {
+	code: TranslationMappingDraftIssueCode;
+}): string {
+	switch (issue.code) {
+		case "incomplete_row":
+			return "Complete each translation mapping or remove the row.";
+		case "invalid_audience_language":
+			return "Choose an Audience language for each translation mapping.";
+		case "duplicate_mapping":
+			return "Each term can have only one mapping per language.";
+		case "term_too_long":
+			return "Mapping terms must be 200 Unicode characters or fewer.";
+		case "translation_too_long":
+			return "Mapping replacements must be 200 Unicode characters or fewer.";
+		case "too_many_mappings":
+			return "At most 100 translation mappings are allowed.";
+		case "conflict":
+			return "Reload the glossary before saving.";
+	}
 }
 
 type CreateSession = (
@@ -145,6 +177,15 @@ function useCreateEventForm(
 				const { slug } = await createSession(createSessionInput(value));
 				onCreated(slug);
 			} catch (err) {
+				if (err instanceof TranslationMappingInputError) {
+					formApi.setErrorMap({
+						onSubmit: {
+							form: err.message,
+							fields: {},
+						},
+					});
+					return;
+				}
 				const failure = getPublicConvexError(err, "Couldn't create event");
 				formApi.setErrorMap({
 					onSubmit: {
@@ -698,15 +739,24 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 								</div>
 
 								<form.Field name="translationMappings">
-									{(mappingField) => (
-										<TranslationMappingsField
-											mappings={[...mappingField.state.value]}
-											audienceCodes={audienceCodes}
-											onChange={(mappings) =>
-												mappingField.handleChange(mappings)
-											}
-										/>
-									)}
+									{(mappingField) => {
+										const mappingDraft = validateTranslationMappingDraft(
+											createTranslationMappingDraft({
+												rows: [...mappingField.state.value],
+											}),
+											audienceCodes,
+										);
+										return (
+											<TranslationMappingsField
+												mappings={mappingDraft.rows}
+												audienceCodes={audienceCodes}
+												issues={mappingDraft.issues}
+												onChange={(mappings) =>
+													mappingField.handleChange(mappings)
+												}
+											/>
+										);
+									}}
 								</form.Field>
 							</div>
 						);

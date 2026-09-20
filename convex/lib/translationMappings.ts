@@ -1,12 +1,21 @@
-import type { Infer } from "convex/values";
 import { Effect, Schema } from "effect";
-import type { translationMappingValidator } from "../schema";
-import { normalizeLanguageCode } from "./languages";
+import { normalizeLanguageCode } from "../../shared/languages";
+import {
+	canonicalizeTranslationMappings as canonicalizeMappingPolicy,
+	canonicalTranslationMappingsEqual,
+	filterMappingsForAudience,
+	MAX_MAPPING_VALUE_CHARS,
+	MAX_TRANSLATION_MAPPINGS,
+	type StoredTranslationMapping,
+} from "../../src/lib/translationMappings";
 
-export type TranslationMapping = Infer<typeof translationMappingValidator>;
-
-export const MAX_TRANSLATION_MAPPINGS = 100;
-export const MAX_MAPPING_VALUE_CHARS = 200;
+export type TranslationMapping = StoredTranslationMapping;
+export {
+	canonicalTranslationMappingsEqual,
+	filterMappingsForAudience,
+	MAX_MAPPING_VALUE_CHARS,
+	MAX_TRANSLATION_MAPPINGS,
+};
 
 export class MappingValidationError extends Schema.TaggedError<MappingValidationError>()(
 	"MappingValidationError",
@@ -46,16 +55,8 @@ function folded(value: string): string {
 	return value.toLowerCase();
 }
 
-function characterCount(value: string): number {
-	return Array.from(value).length;
-}
-
 function fail(message: string): Effect.Effect<never, MappingValidationError> {
 	return Effect.fail(new MappingValidationError({ message }));
-}
-
-function compareStrings(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /**
@@ -69,88 +70,10 @@ export const canonicalizeTranslationMappings = Effect.fn(
 	mappings: ReadonlyArray<TranslationMapping>,
 	audienceLanguages: ReadonlyArray<string>,
 ) {
-	if (mappings.length > MAX_TRANSLATION_MAPPINGS) {
-		return yield* fail(
-			`At most ${MAX_TRANSLATION_MAPPINGS} translation mappings are allowed`,
-		);
-	}
-
-	const audienceSet = new Set(
-		audienceLanguages.map((language) => normalizeLanguageCode(language)),
-	);
-	const seen = new Set<string>();
-	const canonical: TranslationMapping[] = [];
-
-	for (const mapping of mappings) {
-		const term = mapping.term.trim().normalize("NFC");
-		const targetLanguage = normalizeLanguageCode(mapping.targetLanguage);
-		const translation = mapping.translation.trim().normalize("NFC");
-
-		if (!term && !mapping.targetLanguage.trim() && !translation) continue;
-		if (!term || !targetLanguage || !translation) {
-			return yield* fail(
-				"Each translation mapping needs a term, target language, and replacement",
-			);
-		}
-		if (!audienceSet.has(targetLanguage)) {
-			return yield* fail(
-				`Mapping target language is not an Audience language: ${targetLanguage}`,
-			);
-		}
-		if (characterCount(term) > MAX_MAPPING_VALUE_CHARS) {
-			return yield* fail(
-				`Mapping terms may contain at most ${MAX_MAPPING_VALUE_CHARS} Unicode characters`,
-			);
-		}
-		if (characterCount(translation) > MAX_MAPPING_VALUE_CHARS) {
-			return yield* fail(
-				`Mapping replacements may contain at most ${MAX_MAPPING_VALUE_CHARS} Unicode characters`,
-			);
-		}
-
-		const key = `${targetLanguage}\u0000${folded(term)}`;
-		if (seen.has(key)) {
-			return yield* fail(`Duplicate mapping for ${term} in ${targetLanguage}`);
-		}
-		seen.add(key);
-		canonical.push({ term, targetLanguage, translation });
-	}
-
-	canonical.sort(
-		(left, right) =>
-			compareStrings(left.targetLanguage, right.targetLanguage) ||
-			compareStrings(folded(left.term), folded(right.term)) ||
-			compareStrings(left.term, right.term),
-	);
-	return canonical;
+	const result = canonicalizeMappingPolicy(mappings, audienceLanguages);
+	if (!result.ok) return yield* fail(result.issue.message);
+	return result.mappings;
 });
-
-export function canonicalTranslationMappingsEqual(
-	left: ReadonlyArray<TranslationMapping>,
-	right: ReadonlyArray<TranslationMapping>,
-): boolean {
-	return (
-		left.length === right.length &&
-		left.every(
-			(mapping, index) =>
-				mapping.term === right[index]?.term &&
-				mapping.targetLanguage === right[index]?.targetLanguage &&
-				mapping.translation === right[index]?.translation,
-		)
-	);
-}
-
-export function filterMappingsForAudience(
-	mappings: ReadonlyArray<TranslationMapping>,
-	audienceLanguages: ReadonlyArray<string>,
-): TranslationMapping[] {
-	const audienceSet = new Set(
-		audienceLanguages.map((language) => normalizeLanguageCode(language)),
-	);
-	return mappings.filter((mapping) =>
-		audienceSet.has(normalizeLanguageCode(mapping.targetLanguage)),
-	);
-}
 
 function isLetterOrNumber(value: string | undefined): boolean {
 	return value !== undefined && /^[\p{L}\p{N}]$/u.test(value);

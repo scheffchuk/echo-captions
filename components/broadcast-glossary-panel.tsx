@@ -2,15 +2,9 @@
 
 import { useMutation } from "convex/react";
 import { BookText } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-	type StoredTranslationMapping,
-	stripMappingIds,
-	type TranslationMapping,
-	TranslationMappingsField,
-	withMappingIds,
-} from "@/components/translation-mappings-field";
+import { TranslationMappingsField } from "@/components/translation-mappings-field";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -35,19 +29,19 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getPublicConvexError } from "@/lib/expected-errors";
 import { cn } from "@/lib/utils";
+import {
+	hydrateTranslationMappingDraft,
+	isTranslationMappingDraftDirty,
+	markTranslationMappingDraftConflict,
+	reconcileTranslationMappingDraft,
+	type TranslationMappingDraft,
+	type TranslationMappingIdFactory,
+	toUpdateInput,
+	validateTranslationMappingDraft,
+} from "@/src/lib/translationMappingDraft";
+import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
-function mappingsEqual(
-	a: TranslationMapping[],
-	b: TranslationMapping[],
-): boolean {
-	if (a.length !== b.length) return false;
-	return a.every(
-		(mapping, index) =>
-			mapping.term === b[index]?.term &&
-			mapping.targetLanguage === b[index]?.targetLanguage &&
-			mapping.translation === b[index]?.translation,
-	);
-}
+const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
 export function BroadcastGlossaryPanel({
 	sessionId,
@@ -74,11 +68,7 @@ export function BroadcastGlossaryPanel({
 	const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
 	const [discardOpen, setDiscardOpen] = useState(false);
 	const [saving, setSaving] = useState(false);
-	const [conflict, setConflict] = useState(false);
-	const [draftRevisionId, setDraftRevisionId] =
-		useState<Id<"translationMappingRevisions"> | null>(
-			initialRevisionId ?? null,
-		);
+	const idFactory = useCallback(browserIdFactory, []);
 
 	const isControlled = openProp !== undefined;
 	const open = isControlled ? openProp : uncontrolledOpen;
@@ -86,39 +76,65 @@ export function BroadcastGlossaryPanel({
 		if (!isControlled) setUncontrolledOpen(next);
 		onOpenChangeProp?.(next);
 	};
-
-	const savedMappings = useMemo(
-		() => withMappingIds(initialMappings),
-		[initialMappings],
+	const hydrateCurrentDraft = useCallback(
+		() =>
+			hydrateTranslationMappingDraft(
+				initialMappings,
+				initialRevisionId ?? null,
+				idFactory,
+			),
+		[initialMappings, initialRevisionId, idFactory],
 	);
 
-	const [mappings, setMappings] = useState<TranslationMapping[]>(savedMappings);
+	const [draft, setDraft] = useState<TranslationMappingDraft>(() =>
+		hydrateCurrentDraft(),
+	);
 	const wasOpenRef = useRef(false);
 
 	useEffect(() => {
-		if (open && !wasOpenRef.current) {
-			setMappings(savedMappings);
-			setDraftRevisionId(initialRevisionId ?? null);
-			setConflict(false);
+		if (!open) {
+			wasOpenRef.current = false;
+			return;
 		}
-		wasOpenRef.current = open;
-	}, [open, savedMappings, initialRevisionId]);
+		if (!wasOpenRef.current) {
+			setDraft(hydrateCurrentDraft());
+			wasOpenRef.current = true;
+			return;
+		}
+		setDraft((current) =>
+			reconcileTranslationMappingDraft(
+				current,
+				initialMappings,
+				initialRevisionId ?? null,
+				idFactory,
+				audienceCodes,
+			),
+		);
+	}, [
+		open,
+		hydrateCurrentDraft,
+		initialMappings,
+		initialRevisionId,
+		idFactory,
+		audienceCodes,
+	]);
 
-	const isDirty = !mappingsEqual(mappings, savedMappings);
+	const validatedDraft = useMemo(
+		() => validateTranslationMappingDraft(draft, audienceCodes),
+		[draft, audienceCodes],
+	);
+	const isDirty = isTranslationMappingDraftDirty(draft, audienceCodes);
+	const conflict = draft.conflict;
 
 	const discardAndClose = () => {
-		setMappings(savedMappings);
-		setDraftRevisionId(initialRevisionId ?? null);
-		setConflict(false);
+		setDraft(hydrateCurrentDraft());
 		setDiscardOpen(false);
 		setOpen(false);
 	};
 
 	const handleOpenChange = (next: boolean) => {
 		if (next) {
-			setMappings(savedMappings);
-			setDraftRevisionId(initialRevisionId ?? null);
-			setConflict(false);
+			setDraft(hydrateCurrentDraft());
 			setOpen(true);
 			return;
 		}
@@ -130,26 +146,31 @@ export function BroadcastGlossaryPanel({
 	};
 
 	const reload = () => {
-		setMappings(savedMappings);
-		setDraftRevisionId(initialRevisionId ?? null);
-		setConflict(false);
+		setDraft(hydrateCurrentDraft());
 	};
 
 	const save = async () => {
+		const input = toUpdateInput(validatedDraft, audienceCodes);
+		if (!input.ok) {
+			setDraft(validatedDraft);
+			return;
+		}
+
 		setSaving(true);
 		try {
 			await updateTranslationMappings({
 				sessionId,
-				translationMappings: stripMappingIds(mappings),
-				expectedRevisionId: draftRevisionId,
+				translationMappings: input.mappings,
+				expectedRevisionId: draft.baseRevisionId
+					? (draft.baseRevisionId as Id<"translationMappingRevisions">)
+					: null,
 			});
 			toast.success("Glossary saved");
-			setConflict(false);
 			setOpen(false);
 		} catch (error) {
 			const failure = getPublicConvexError(error, "Couldn't save glossary");
 			if (failure.code === "mapping_revision_conflict") {
-				setConflict(true);
+				setDraft((current) => markTranslationMappingDraftConflict(current));
 				toast.error("Glossary changed elsewhere. Reload it before saving.");
 				return;
 			}
@@ -159,10 +180,11 @@ export function BroadcastGlossaryPanel({
 		}
 	};
 
+	const savedMappingCount = initialMappings?.length ?? 0;
 	const termCountLabel =
-		savedMappings.length === 0
+		savedMappingCount === 0
 			? "No terms yet"
-			: `${savedMappings.length} term${savedMappings.length === 1 ? "" : "s"}`;
+			: `${savedMappingCount} term${savedMappingCount === 1 ? "" : "s"}`;
 
 	const triggerNode =
 		trigger === "none" ? null : trigger === "button" ? (
@@ -213,10 +235,14 @@ export function BroadcastGlossaryPanel({
 					{open ? (
 						<TranslationMappingsField
 							key={sessionId}
-							mappings={mappings}
+							mappings={draft.rows}
 							audienceCodes={audienceCodes}
-							onChange={setMappings}
+							issues={validatedDraft.issues}
+							onChange={(rows) =>
+								setDraft((current) => ({ ...current, rows, issues: [] }))
+							}
 							disabled={saving}
+							idFactory={idFactory}
 						/>
 					) : null}
 					{conflict ? (
