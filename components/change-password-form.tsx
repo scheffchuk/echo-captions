@@ -1,52 +1,8 @@
-import { useForm } from "@tanstack/react-form";
-import { Schema } from "effect";
+import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getOperatorAuthErrorMessage } from "../src/lib/auth/operator";
-
-function passwordSchema() {
-	return Schema.toStandardSchemaV1(
-		Schema.Struct({
-			currentPassword: Schema.String.check(
-				Schema.isMinLength(8, {
-					message: "Password must be at least 8 characters",
-				}),
-			),
-			newPassword: Schema.String.check(
-				Schema.isMinLength(8, {
-					message: "Password must be at least 8 characters",
-				}),
-			),
-		}),
-	);
-}
-
-function validationErrorMessage(error: unknown): string {
-	if (typeof error === "string") return error;
-	if (
-		typeof error === "object" &&
-		error !== null &&
-		"message" in error &&
-		typeof error.message === "string"
-	) {
-		return error.message;
-	}
-	return String(error);
-}
-
-function FieldErrors({ errors }: { errors: unknown[] }) {
-	if (errors.length === 0) return null;
-	return (
-		<div className="space-y-1 text-sm text-destructive">
-			{errors.map((error) => (
-				<p key={validationErrorMessage(error)}>
-					{validationErrorMessage(error)}
-				</p>
-			))}
-		</div>
-	);
-}
 
 export function ChangePasswordForm({
 	onChangePassword,
@@ -58,91 +14,82 @@ export function ChangePasswordForm({
 	}) => Promise<void>;
 	onDone: () => void;
 }) {
-	const form = useForm({
-		defaultValues: { currentPassword: "", newPassword: "" },
-		validators: { onSubmit: passwordSchema() },
-		onSubmit: async ({ value, formApi }) => {
-			formApi.setErrorMap({ onSubmit: undefined });
-			try {
-				await onChangePassword(value);
-				onDone();
-			} catch (error) {
-				formApi.setErrorMap({
-					onSubmit: { form: getOperatorAuthErrorMessage(error), fields: {} },
-				});
-			}
-		},
-	});
+	const [currentPassword, setCurrentPassword] = useState("");
+	const [newPassword, setNewPassword] = useState("");
+	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [showValidation, setShowValidation] = useState(false);
+
+	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (isSubmitting) return;
+		if (currentPassword.length < 8 || newPassword.length < 8) {
+			setShowValidation(true);
+			return;
+		}
+
+		setSubmitError(null);
+		setIsSubmitting(true);
+		try {
+			await onChangePassword({ currentPassword, newPassword });
+			setIsSubmitting(false);
+			onDone();
+		} catch (error) {
+			setIsSubmitting(false);
+			setSubmitError(getOperatorAuthErrorMessage(error));
+		}
+	};
 
 	return (
-		<form
-			noValidate
-			className="space-y-4"
-			onSubmit={(event) => {
-				event.preventDefault();
-				void form.handleSubmit();
-			}}
-		>
-			<form.Subscribe selector={(state) => state.isSubmitting}>
-				{(isSubmitting) => (
-					<>
-						<form.Field name="currentPassword">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor="current-password">Current password</Label>
-									<Input
-										id="current-password"
-										name="currentPassword"
-										type="password"
-										autoComplete="current-password"
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(event) => field.handleChange(event.target.value)}
-										disabled={isSubmitting}
-									/>
-									<FieldErrors errors={field.state.meta.errors} />
-								</div>
-							)}
-						</form.Field>
-						<form.Field name="newPassword">
-							{(field) => (
-								<div className="space-y-2">
-									<Label htmlFor="new-password">New password</Label>
-									<Input
-										id="new-password"
-										name="newPassword"
-										type="password"
-										autoComplete="new-password"
-										value={field.state.value}
-										onBlur={field.handleBlur}
-										onChange={(event) => field.handleChange(event.target.value)}
-										disabled={isSubmitting}
-									/>
-									<FieldErrors errors={field.state.meta.errors} />
-								</div>
-							)}
-						</form.Field>
-						<form.Subscribe selector={(state) => state.errorMap.onSubmit}>
-							{(error) =>
-								error ? (
-									<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-										{validationErrorMessage(
-											typeof error === "object" &&
-												error !== null &&
-												"form" in error
-												? error.form
-												: error,
-										)}
-									</div>
-								) : null
-							}
-						</form.Subscribe>
-						<Button type="submit" className="w-full" disabled={isSubmitting}>
-							{isSubmitting ? "Saving…" : "Save password"}
-						</Button>
-					</>
-				)}
-			</form.Subscribe>
+		<form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
+			<div className="space-y-2">
+				<Label htmlFor="current-password">Current password</Label>
+				<Input
+					id="current-password"
+					name="currentPassword"
+					type="password"
+					autoComplete="current-password"
+					value={currentPassword}
+					onChange={(event) => setCurrentPassword(event.target.value)}
+					onInvalid={() => setShowValidation(true)}
+					required
+					minLength={8}
+					disabled={isSubmitting}
+				/>
+				{showValidation && currentPassword.length < 8 ? (
+					<p className="text-sm text-destructive">
+						Password must be at least 8 characters
+					</p>
+				) : null}
+			</div>
+			<div className="space-y-2">
+				<Label htmlFor="new-password">New password</Label>
+				<Input
+					id="new-password"
+					name="newPassword"
+					type="password"
+					autoComplete="new-password"
+					value={newPassword}
+					onChange={(event) => setNewPassword(event.target.value)}
+					onInvalid={() => setShowValidation(true)}
+					required
+					minLength={8}
+					disabled={isSubmitting}
+				/>
+				{showValidation && newPassword.length < 8 ? (
+					<p className="text-sm text-destructive">
+						Password must be at least 8 characters
+					</p>
+				) : null}
+			</div>
+			{submitError ? (
+				<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+					{submitError}
+				</div>
+			) : null}
+			<Button type="submit" className="w-full" disabled={isSubmitting}>
+				{isSubmitting ? "Saving…" : "Save password"}
+			</Button>
 		</form>
 	);
 }

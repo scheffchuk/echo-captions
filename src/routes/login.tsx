@@ -1,7 +1,6 @@
-import { useForm } from "@tanstack/react-form";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { EchoWordmark } from "@/components/echo-wordmark";
 import { PageLoading } from "@/components/loading-states";
 import { OperatorChrome } from "@/components/operator-chrome";
@@ -87,47 +86,6 @@ function OperatorAccessDenied({
 	);
 }
 
-function loginSchema() {
-	return Schema.toStandardSchemaV1(
-		Schema.Struct({
-			email: Schema.String.check(
-				Schema.isMinLength(1, { message: "Email is required" }),
-			),
-			password: Schema.String.check(
-				Schema.isMinLength(8, {
-					message: "Password must be at least 8 characters",
-				}),
-			),
-		}),
-	);
-}
-
-function validationErrorMessage(error: unknown): string {
-	if (typeof error === "string") return error;
-	if (
-		typeof error === "object" &&
-		error !== null &&
-		"message" in error &&
-		typeof error.message === "string"
-	) {
-		return error.message;
-	}
-	return String(error);
-}
-
-function FieldErrors({ errors }: { errors: unknown[] }) {
-	if (errors.length === 0) return null;
-	return (
-		<div className="space-y-1 text-sm text-destructive">
-			{errors.map((error) => (
-				<p key={validationErrorMessage(error)}>
-					{validationErrorMessage(error)}
-				</p>
-			))}
-		</div>
-	);
-}
-
 export function LoginForm({
 	canSignUp,
 	defaultFlow,
@@ -144,26 +102,32 @@ export function LoginForm({
 	const [flow, setFlow] = useState<LoginFlow>(
 		canSignUp ? defaultFlow : "signIn",
 	);
-	const form = useForm({
-		defaultValues: { email: "", password: "" },
-		validators: { onSubmit: loginSchema() },
-		onSubmit: async ({ value, formApi }) => {
-			formApi.setErrorMap({ onSubmit: undefined });
-			try {
-				await signInWithPassword({
-					email: value.email,
-					password: value.password,
-					flow,
-				});
-			} catch (error) {
-				formApi.setErrorMap({
-					onSubmit: { form: getOperatorAuthErrorMessage(error), fields: {} },
-				});
-			}
-		},
-	});
+	const [email, setEmail] = useState("");
+	const [password, setPassword] = useState("");
+	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [showValidation, setShowValidation] = useState(false);
 
 	const creating = flow === "signUp";
+
+	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (isSubmitting) return;
+		if (email.length === 0 || password.length < 8) {
+			setShowValidation(true);
+			return;
+		}
+
+		setSubmitError(null);
+		setIsSubmitting(true);
+		try {
+			await signInWithPassword({ email, password, flow });
+		} catch (error) {
+			setSubmitError(getOperatorAuthErrorMessage(error));
+		} finally {
+			setIsSubmitting(false);
+		}
+	};
 
 	return (
 		<OperatorChrome className="flex items-center justify-center p-6">
@@ -179,117 +143,85 @@ export function LoginForm({
 				</div>
 
 				<form
-					noValidate
-					onSubmit={(event) => {
-						event.preventDefault();
-						void form.handleSubmit();
-					}}
+					onSubmit={(event) => void handleSubmit(event)}
 					className="space-y-4"
 				>
-					<form.Subscribe selector={(state) => state.isSubmitting}>
-						{(isSubmitting) => (
-							<>
-								<form.Field name="email">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor="email" className="sr-only">
-												Email
-											</Label>
-											<Input
-												id="email"
-												name="email"
-												type="email"
-												autoComplete="username"
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(event) =>
-													field.handleChange(event.target.value)
-												}
-												placeholder="Email"
-												required
-												disabled={isSubmitting}
-												className="w-full"
-											/>
-											<FieldErrors errors={field.state.meta.errors} />
-										</div>
-									)}
-								</form.Field>
-								<form.Field name="password">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor="password" className="sr-only">
-												Password
-											</Label>
-											<Input
-												id="password"
-												name="password"
-												type="password"
-												autoComplete={
-													creating ? "new-password" : "current-password"
-												}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(event) =>
-													field.handleChange(event.target.value)
-												}
-												placeholder="Password"
-												required
-												minLength={8}
-												disabled={isSubmitting}
-												className="w-full"
-											/>
-											<FieldErrors errors={field.state.meta.errors} />
-										</div>
-									)}
-								</form.Field>
-								<form.Subscribe selector={(state) => state.errorMap.onSubmit}>
-									{(error) =>
-										error ? (
-											<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-												{validationErrorMessage(
-													typeof error === "object" &&
-														error !== null &&
-														"form" in error
-														? error.form
-														: error,
-												)}
-											</div>
-										) : null
-									}
-								</form.Subscribe>
-								<Button
-									type="submit"
-									className="w-full"
-									disabled={isSubmitting}
-								>
-									{isSubmitting
-										? creating
-											? "Creating account…"
-											: "Signing in…"
-										: creating
-											? "Create account"
-											: "Sign in"}
-								</Button>
-								{canSignUp ? (
-									<Button
-										type="button"
-										variant="ghost"
-										className="w-full"
-										disabled={isSubmitting}
-										onClick={() =>
-											setFlow((current) =>
-												current === "signUp" ? "signIn" : "signUp",
-											)
-										}
-									>
-										{creating
-											? "Already have an account? Sign in"
-											: "Need an account? Create one"}
-									</Button>
-								) : null}
-							</>
-						)}
-					</form.Subscribe>
+					<div className="space-y-2">
+						<Label htmlFor="email" className="sr-only">
+							Email
+						</Label>
+						<Input
+							id="email"
+							name="email"
+							type="email"
+							autoComplete="username"
+							value={email}
+							onChange={(event) => setEmail(event.target.value)}
+							onInvalid={() => setShowValidation(true)}
+							placeholder="Email"
+							required
+							disabled={isSubmitting}
+							className="w-full"
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="password" className="sr-only">
+							Password
+						</Label>
+						<Input
+							id="password"
+							name="password"
+							type="password"
+							autoComplete={creating ? "new-password" : "current-password"}
+							value={password}
+							onChange={(event) => setPassword(event.target.value)}
+							onInvalid={() => setShowValidation(true)}
+							placeholder="Password"
+							required
+							minLength={8}
+							disabled={isSubmitting}
+							className="w-full"
+						/>
+						{showValidation && password.length < 8 ? (
+							<p className="text-sm text-destructive">
+								Password must be at least 8 characters
+							</p>
+						) : null}
+					</div>
+					{showValidation && email.length === 0 ? (
+						<p className="text-sm text-destructive">Email is required</p>
+					) : null}
+					{submitError ? (
+						<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+							{submitError}
+						</div>
+					) : null}
+					<Button type="submit" className="w-full" disabled={isSubmitting}>
+						{isSubmitting
+							? creating
+								? "Creating account…"
+								: "Signing in…"
+							: creating
+								? "Create account"
+								: "Sign in"}
+					</Button>
+					{canSignUp ? (
+						<Button
+							type="button"
+							variant="ghost"
+							className="w-full"
+							disabled={isSubmitting}
+							onClick={() =>
+								setFlow((current) =>
+									current === "signUp" ? "signIn" : "signUp",
+								)
+							}
+						>
+							{creating
+								? "Already have an account? Sign in"
+								: "Need an account? Create one"}
+						</Button>
+					) : null}
 				</form>
 			</div>
 		</OperatorChrome>

@@ -21,10 +21,18 @@ describe("LoginForm", () => {
 			/>,
 		);
 
+		const form = screen.getByPlaceholderText("Email").closest("form");
+		expect(form).not.toHaveAttribute("novalidate");
+
 		await user.type(screen.getByPlaceholderText("Password"), "short");
 		await user.click(screen.getByRole("button", { name: "Sign in" }));
 
+		expect(screen.getByPlaceholderText("Email")).toBeInvalid();
 		expect(screen.getByText("Email is required")).toBeInTheDocument();
+		expect(screen.getByPlaceholderText("Password")).toHaveAttribute(
+			"minlength",
+			"8",
+		);
 		expect(
 			screen.getByText("Password must be at least 8 characters"),
 		).toBeInTheDocument();
@@ -147,5 +155,42 @@ describe("LoginForm", () => {
 		expect(
 			screen.queryByText("That email or password wasn’t recognized."),
 		).not.toBeInTheDocument();
+	});
+
+	it("prevents duplicate sign-in actions while submission is pending", async () => {
+		let resolveSignIn!: () => void;
+		const signInWithPassword = vi.fn().mockReturnValue(
+			new Promise<void>((resolve) => {
+				resolveSignIn = resolve;
+			}),
+		);
+		const user = userEvent.setup();
+		render(
+			<LoginForm
+				canSignUp
+				defaultFlow="signIn"
+				signInWithPassword={signInWithPassword}
+			/>,
+		);
+
+		await user.type(
+			screen.getByPlaceholderText("Email"),
+			"operator@echo.example",
+		);
+		await user.type(screen.getByPlaceholderText("Password"), "password123");
+		await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+		const submitButton = screen.getByRole("button", { name: "Signing in…" });
+		await waitFor(() => expect(submitButton).toBeDisabled());
+		expect(
+			screen.getByRole("button", { name: "Need an account? Create one" }),
+		).toBeDisabled();
+		await user.click(submitButton);
+		expect(signInWithPassword).toHaveBeenCalledTimes(1);
+
+		resolveSignIn();
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled(),
+		);
 	});
 });
