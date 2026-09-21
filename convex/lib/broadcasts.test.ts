@@ -61,6 +61,19 @@ describe("broadcast lifecycle policy", () => {
 		).toEqual({ kind: "noop" });
 	});
 
+	test("rejects abandoning a Broadcast that is already stopping", () => {
+		expect(
+			classifyBroadcastTransition(
+				{
+					...activeBroadcast,
+					status: "stopping" as const,
+					finalCommitOrdinal: 3,
+				},
+				{ kind: "abandon", finalCommitOrdinal: 3 },
+			),
+		).toEqual({ kind: "invalid", reason: "not_lost" });
+	});
+
 	test("reschedules a stale expiry callback while the heartbeat is still valid", () => {
 		expect(
 			classifyBroadcastTransition(

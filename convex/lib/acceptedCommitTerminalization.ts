@@ -1,7 +1,5 @@
-import { Effect } from "effect";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { runConvex } from "../effect/run";
 import { finishCommitDrain } from "./broadcasts";
 import { CAPTION_TARGET_RETRY_BEHAVIOR } from "./captionRetry";
 import {
@@ -175,9 +173,7 @@ async function finishAcceptedCommit(
 	decrementPendingCount: boolean,
 ) {
 	if (decrementPendingCount) {
-		await runConvex(
-			finishCommitDrain(ctx, commit.broadcastId).pipe(Effect.orDie),
-		);
+		await finishCommitDrain(ctx, commit.broadcastId);
 	}
 	await scheduleRetryDispatch(ctx, 0);
 }

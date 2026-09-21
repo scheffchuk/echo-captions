@@ -1,13 +1,11 @@
 import type { FunctionReference } from "convex/server";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { fromConvex } from "../effect/convex";
-import { getOperator, Unauthorized } from "./auth";
+import { requireCurrentOperatorId, Unauthorized } from "./auth";
 import {
-	getOwnedSession,
-	nowMillis,
+	getOwnedSessionNative,
 	SessionBusy,
 	SessionDeleting,
 	SessionNotFound,
@@ -112,13 +110,6 @@ function broadcastStateError(state: BroadcastLifecycleState) {
 	return null;
 }
 
-function validateBroadcastState(broadcast: Doc<"broadcasts">) {
-	const error = broadcastStateError(broadcast);
-	return error === null
-		? Effect.succeed(broadcast)
-		: Effect.die(new Error(error));
-}
-
 export function classifyBroadcastTransition(
 	state: BroadcastLifecycleState,
 	transition: BroadcastTransition,
@@ -152,12 +143,12 @@ export function classifyBroadcastTransition(
 	}
 
 	if (state.status === "sealed") return { kind: "noop" };
+	if (transition.kind === "abandon" && state.status !== "lost") {
+		return { kind: "invalid", reason: "not_lost" };
+	}
 	if (state.status === "stopping") return { kind: "checkDrain" };
 	if (transition.kind === "stop" && state.status === "lost") {
 		return { kind: "invalid", reason: "not_active" };
-	}
-	if (transition.kind === "abandon" && state.status !== "lost") {
-		return { kind: "invalid", reason: "not_lost" };
 	}
 
 	return {
@@ -250,51 +241,41 @@ export async function readBroadcastProjection(
 	return projectBroadcast(unresolved, audience);
 }
 
-export const getOwnedBroadcast = Effect.fn("Broadcasts.getOwned")(function* (
+async function getOwnedBroadcast(
 	ctx: BroadcastCtx,
 	broadcastId: Id<"broadcasts">,
+	ownerId: Id<"users">,
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const broadcast = yield* fromConvex(
-		() => ctx.db.get("broadcasts", broadcastId),
-		"Broadcasts.getOwned",
-	);
+	const broadcast = await ctx.db.get("broadcasts", broadcastId);
 	if (!broadcast) {
-		return yield* new BroadcastNotFound({ message: "Broadcast not found" });
+		throw new BroadcastNotFound({ message: "Broadcast not found" });
 	}
 
-	const session = yield* fromConvex(
-		() => ctx.db.get("sessions", broadcast.sessionId),
-		"Broadcasts.getOwnedSession",
-	);
+	const session = await ctx.db.get("sessions", broadcast.sessionId);
 	if (!session) {
-		return yield* new SessionNotFound({ message: "Session not found" });
+		throw new SessionNotFound({ message: "Session not found" });
 	}
 	if (session.ownerId !== ownerId) {
-		return yield* new Unauthorized({ message: "Unauthorized" });
+		throw new Unauthorized({ message: "Unauthorized" });
 	}
-	return yield* validateBroadcastState(broadcast);
-});
+	return assertValidBroadcastState(broadcast);
+}
 
-export const getUnresolvedBroadcast = Effect.fn("Broadcasts.getUnresolved")(
-	function* (ctx: BroadcastCtx, sessionId: Id<"sessions">) {
-		return yield* fromConvex(
-			() => readUnresolvedBroadcast(ctx, sessionId),
-			"Broadcasts.getUnresolved",
-		);
-	},
-);
+export async function getUnresolvedBroadcast(
+	ctx: BroadcastCtx,
+	sessionId: Id<"sessions">,
+) {
+	return await readUnresolvedBroadcast(ctx, sessionId);
+}
 
-export const getBroadcastProjection = Effect.fn("Broadcasts.getProjection")(
-	function* (
-		ctx: BroadcastCtx,
-		sessionId: Id<"sessions">,
-		audience: BroadcastProjectionAudience,
-	) {
-		const broadcast = yield* getUnresolvedBroadcast(ctx, sessionId);
-		return projectBroadcast(broadcast, audience);
-	},
-);
+export async function getBroadcastProjection(
+	ctx: BroadcastCtx,
+	sessionId: Id<"sessions">,
+	audience: BroadcastProjectionAudience,
+) {
+	const broadcast = await getUnresolvedBroadcast(ctx, sessionId);
+	return projectBroadcast(broadcast, audience);
+}
 
 export function isBroadcastDrained(
 	broadcast: Pick<
@@ -309,15 +290,12 @@ export function isBroadcastDrained(
 	);
 }
 
-export const maybeSealBroadcast = Effect.fn("Broadcasts.maybeSeal")(function* (
+export async function maybeSealBroadcast(
 	ctx: MutationCtx,
 	broadcastId: Id<"broadcasts">,
 ) {
-	const broadcast = yield* fromConvex(
-		() => ctx.db.get("broadcasts", broadcastId),
-		"Broadcasts.maybeSeal.get",
-	);
-	if (broadcast) yield* validateBroadcastState(broadcast);
+	const broadcast = await ctx.db.get("broadcasts", broadcastId);
+	if (broadcast) assertValidBroadcastState(broadcast);
 	if (
 		broadcast?.status !== "stopping" ||
 		broadcast.finalCommitOrdinal === undefined
@@ -329,44 +307,28 @@ export const maybeSealBroadcast = Effect.fn("Broadcasts.maybeSeal")(function* (
 		return broadcast;
 	}
 
-	const sealedAt = yield* nowMillis();
-	yield* fromConvex(
-		() => ctx.db.patch(broadcastId, { status: "sealed", sealedAt }),
-		"Broadcasts.maybeSeal.patch",
-	);
-	return yield* fromConvex(
-		() => ctx.db.get("broadcasts", broadcastId),
-		"Broadcasts.maybeSeal.getSealed",
-	);
-});
+	const sealedAt = Date.now();
+	await ctx.db.patch(broadcastId, { status: "sealed", sealedAt });
+	return await ctx.db.get("broadcasts", broadcastId);
+}
 
-export const finishCommitDrain = Effect.fn("Broadcasts.finishCommitDrain")(
-	function* (ctx: MutationCtx, broadcastId: Id<"broadcasts">) {
-		const broadcast = yield* fromConvex(
-			() => ctx.db.get("broadcasts", broadcastId),
-			"Broadcasts.finishCommitDrain.get",
-		);
-		if (!broadcast) {
-			return yield* Effect.die(
-				new Error("Accepted commit references a missing Broadcast"),
-			);
-		}
-		yield* validateBroadcastState(broadcast);
-		if (broadcast.pendingCommitCount <= 0) {
-			return yield* Effect.die(
-				new Error("Broadcast pending commit count underflow"),
-			);
-		}
-		yield* fromConvex(
-			() =>
-				ctx.db.patch(broadcastId, {
-					pendingCommitCount: broadcast.pendingCommitCount - 1,
-				}),
-			"Broadcasts.finishCommitDrain.decrement",
-		);
-		return yield* maybeSealBroadcast(ctx, broadcastId);
-	},
-);
+export async function finishCommitDrain(
+	ctx: MutationCtx,
+	broadcastId: Id<"broadcasts">,
+) {
+	const broadcast = await ctx.db.get("broadcasts", broadcastId);
+	if (!broadcast) {
+		throw new Error("Accepted commit references a missing Broadcast");
+	}
+	assertValidBroadcastState(broadcast);
+	if (broadcast.pendingCommitCount <= 0) {
+		throw new Error("Broadcast pending commit count underflow");
+	}
+	await ctx.db.patch(broadcastId, {
+		pendingCommitCount: broadcast.pendingCommitCount - 1,
+	});
+	return await maybeSealBroadcast(ctx, broadcastId);
+}
 
 export type HeartbeatExpiryArgs = {
 	broadcastId: Id<"broadcasts">;
@@ -379,16 +341,13 @@ const markLostReference: FunctionReference<
 	null
 > = internal.broadcasts.markLost;
 
-const scheduleHeartbeatExpiry = Effect.fn("Broadcasts.scheduleExpiry")(
-	function* (ctx: MutationCtx, args: HeartbeatExpiryArgs, delayMs: number) {
-		yield* fromConvex(
-			() =>
-				ctx.scheduler.runAfter(Math.max(0, delayMs), markLostReference, args),
-			"Broadcasts.scheduleExpiry",
-		);
-		return null;
-	},
-);
+async function scheduleHeartbeatExpiry(
+	ctx: MutationCtx,
+	args: HeartbeatExpiryArgs,
+	delayMs: number,
+) {
+	await ctx.scheduler.runAfter(Math.max(0, delayMs), markLostReference, args);
+}
 
 function transitionError(
 	reason: Exclude<
@@ -412,50 +371,39 @@ function transitionError(
 	});
 }
 
-export const startBroadcast = Effect.fn("Broadcasts.start")(function* (
+export async function startBroadcast(
 	ctx: MutationCtx,
 	sessionId: Id<"sessions">,
 ) {
-	const session = yield* getOwnedSession(
-		ctx,
-		sessionId,
-		yield* getOperator(ctx),
-	);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
 
-	const unresolved = yield* getUnresolvedBroadcast(ctx, sessionId);
+	const unresolved = await getUnresolvedBroadcast(ctx, sessionId);
 	if (unresolved) {
-		return yield* new SessionBusy({
+		throw new SessionBusy({
 			message: "The Session already has an unresolved Broadcast",
 		});
 	}
 
 	const sequence = session.lastBroadcastSequence + 1;
-	const startedAt = yield* nowMillis();
-	const broadcastId = yield* fromConvex(
-		() =>
-			ctx.db.insert("broadcasts", {
-				sessionId,
-				sequence,
-				status: "active",
-				startedAt,
-				lastHeartbeatAt: startedAt,
-				lastCommitOrdinal: 0,
-				pendingCommitCount: 0,
-			}),
-		"Broadcasts.start.insert",
-	);
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(sessionId, {
-				lastBroadcastSequence: sequence,
-				lastActivityAt: startedAt,
-			}),
-		"Broadcasts.start.updateSession",
-	);
-	yield* scheduleHeartbeatExpiry(
+	const startedAt = Date.now();
+	const broadcastId = await ctx.db.insert("broadcasts", {
+		sessionId,
+		sequence,
+		status: "active",
+		startedAt,
+		lastHeartbeatAt: startedAt,
+		lastCommitOrdinal: 0,
+		pendingCommitCount: 0,
+	});
+	await ctx.db.patch(sessionId, {
+		lastBroadcastSequence: sequence,
+		lastActivityAt: startedAt,
+	});
+	await scheduleHeartbeatExpiry(
 		ctx,
 		{ broadcastId },
 		BROADCAST_HEARTBEAT_TIMEOUT_MS,
@@ -467,54 +415,46 @@ export const startBroadcast = Effect.fn("Broadcasts.start")(function* (
 		status: "active" as const,
 		lastCommitOrdinal: 0,
 	};
-});
+}
 
-export const sendHeartbeat = Effect.fn("Broadcasts.heartbeat")(function* (
+export async function sendHeartbeat(
 	ctx: MutationCtx,
 	broadcastId: Id<"broadcasts">,
 ) {
-	const broadcast = yield* getOwnedBroadcast(ctx, broadcastId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const broadcast = await getOwnedBroadcast(ctx, broadcastId, ownerId);
 	if (broadcast.status !== "active") return null;
-	const lastHeartbeatAt = yield* nowMillis();
+	const lastHeartbeatAt = Date.now();
 	const decision = classifyBroadcastTransition(
 		{ ...broadcast, lastHeartbeatAt: broadcast.lastHeartbeatAt },
 		{ kind: "heartbeatExpired", now: lastHeartbeatAt },
 	);
 	if (decision.kind === "markLost") {
-		yield* fromConvex(
-			() => ctx.db.patch(broadcastId, { status: "lost" }),
-			"Broadcasts.heartbeat.markLost",
-		);
+		await ctx.db.patch(broadcastId, { status: "lost" });
 		return null;
 	}
 	if (decision.kind === "invalid") {
-		return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
+		throw new Error("Invalid Broadcast lifecycle state");
 	}
 	if (decision.kind !== "reschedule") return null;
-	yield* fromConvex(
-		() => ctx.db.patch(broadcastId, { lastHeartbeatAt }),
-		"Broadcasts.heartbeat.patch",
-	);
+	await ctx.db.patch(broadcastId, { lastHeartbeatAt });
 	return null;
-});
+}
 
-export const markBroadcastLost = Effect.fn("Broadcasts.markLost")(function* (
+export async function markBroadcastLost(
 	ctx: MutationCtx,
 	args: HeartbeatExpiryArgs,
 ) {
-	const broadcast = yield* fromConvex(
-		() => ctx.db.get("broadcasts", args.broadcastId),
-		"Broadcasts.markLost.get",
-	);
+	const broadcast = await ctx.db.get("broadcasts", args.broadcastId);
 	if (!broadcast) return null;
 
-	const now = yield* nowMillis();
+	const now = Date.now();
 	const decision = classifyBroadcastTransition(
 		{ ...broadcast, lastHeartbeatAt: broadcast.lastHeartbeatAt },
 		{ kind: "heartbeatExpired", now },
 	);
 	if (decision.kind === "reschedule") {
-		yield* scheduleHeartbeatExpiry(
+		await scheduleHeartbeatExpiry(
 			ctx,
 			{ broadcastId: args.broadcastId },
 			decision.delayMs,
@@ -522,52 +462,46 @@ export const markBroadcastLost = Effect.fn("Broadcasts.markLost")(function* (
 		return null;
 	}
 	if (decision.kind === "invalid") {
-		return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
+		throw new Error("Invalid Broadcast lifecycle state");
 	}
 	if (decision.kind !== "markLost") return null;
 
-	yield* fromConvex(
-		() => ctx.db.patch(args.broadcastId, { status: "lost" }),
-		"Broadcasts.markLost.patch",
-	);
+	await ctx.db.patch(args.broadcastId, { status: "lost" });
 	return null;
-});
+}
 
-export const resumeBroadcast = Effect.fn("Broadcasts.resume")(function* (
+export async function resumeBroadcast(
 	ctx: MutationCtx,
 	broadcastId: Id<"broadcasts">,
 ) {
-	const broadcast = yield* getOwnedBroadcast(ctx, broadcastId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const broadcast = await getOwnedBroadcast(ctx, broadcastId, ownerId);
 	const decision = classifyBroadcastTransition(broadcast, { kind: "resume" });
 	if (decision.kind === "invalid") {
 		if (decision.reason === "invalid_state") {
-			return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
+			throw new Error("Invalid Broadcast lifecycle state");
 		}
-		return yield* transitionError(
+		throw transitionError(
 			decision.reason,
 			"Only a Lost Broadcast can be resumed",
 		);
 	}
 	if (decision.kind === "noop") return toBroadcastResult(broadcast);
 
-	const session = yield* getOwnedSession(
+	const session = await getOwnedSessionNative(
 		ctx,
 		broadcast.sessionId,
-		yield* getOperator(ctx),
+		ownerId,
 	);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
-	const lastHeartbeatAt = yield* nowMillis();
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(broadcastId, {
-				status: "active",
-				lastHeartbeatAt,
-			}),
-		"Broadcasts.resume.patch",
-	);
-	yield* scheduleHeartbeatExpiry(
+	const lastHeartbeatAt = Date.now();
+	await ctx.db.patch(broadcastId, {
+		status: "active",
+		lastHeartbeatAt,
+	});
+	await scheduleHeartbeatExpiry(
 		ctx,
 		{ broadcastId },
 		BROADCAST_HEARTBEAT_TIMEOUT_MS,
@@ -578,46 +512,63 @@ export const resumeBroadcast = Effect.fn("Broadcasts.resume")(function* (
 		status: "active",
 		lastCommitOrdinal: broadcast.lastCommitOrdinal,
 	});
-});
+}
 
-export const abandonBroadcast = Effect.fn("Broadcasts.abandon")(function* (
+type TerminalBroadcastTransition =
+	| {
+			kind: "stop";
+			broadcastId: Id<"broadcasts">;
+			finalCommitOrdinal?: number;
+	  }
+	| {
+			kind: "abandon";
+			broadcastId: Id<"broadcasts">;
+	  };
+
+async function terminalBroadcastTransition(
 	ctx: MutationCtx,
-	broadcastId: Id<"broadcasts">,
+	args: TerminalBroadcastTransition,
 ) {
-	const broadcast = yield* getOwnedBroadcast(ctx, broadcastId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const broadcast = await getOwnedBroadcast(ctx, args.broadcastId, ownerId);
+	const finalCommitOrdinal =
+		args.kind === "stop" && args.finalCommitOrdinal !== undefined
+			? validateFinalCommitOrdinal(args.finalCommitOrdinal)
+			: broadcast.lastCommitOrdinal;
 	const decision = classifyBroadcastTransition(broadcast, {
-		kind: "abandon",
-		finalCommitOrdinal: broadcast.lastCommitOrdinal,
+		kind: args.kind,
+		finalCommitOrdinal,
 	});
+
 	if (decision.kind === "noop") return toBroadcastResult(broadcast);
 	if (decision.kind === "checkDrain") {
-		const sealed = yield* maybeSealBroadcast(ctx, broadcastId);
+		const sealed = await maybeSealBroadcast(ctx, args.broadcastId);
 		return toBroadcastResult(sealed ?? broadcast);
 	}
 	if (decision.kind === "invalid") {
 		if (decision.reason === "invalid_state") {
-			return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
+			throw new Error("Invalid Broadcast lifecycle state");
 		}
-		return yield* transitionError(
+		throw transitionError(
 			decision.reason,
-			"Only a Lost Broadcast can be abandoned",
+			args.kind === "abandon"
+				? "Only a Lost Broadcast can be abandoned"
+				: undefined,
 		);
 	}
 	if (decision.kind !== "transition") {
-		return yield* Effect.die(
-			new Error("Invalid Broadcast transition decision"),
-		);
+		throw new Error("Invalid Broadcast transition decision");
 	}
 
-	const session = yield* getOwnedSession(
+	const session = await getOwnedSessionNative(
 		ctx,
 		broadcast.sessionId,
-		yield* getOperator(ctx),
+		ownerId,
 	);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
-	const stoppedAt = yield* nowMillis();
+	const stoppedAt = Date.now();
 	const patch =
 		decision.status === "sealed"
 			? {
@@ -629,80 +580,30 @@ export const abandonBroadcast = Effect.fn("Broadcasts.abandon")(function* (
 					status: decision.status,
 					finalCommitOrdinal: decision.finalCommitOrdinal,
 				};
-	yield* fromConvex(
-		() => ctx.db.patch(broadcastId, patch),
-		"Broadcasts.abandon.patch",
-	);
-	yield* fromConvex(
-		() => ctx.db.patch(broadcast.sessionId, { lastActivityAt: stoppedAt }),
-		"Broadcasts.abandon.updateSession",
-	);
+	await ctx.db.patch(args.broadcastId, patch);
+	await ctx.db.patch(broadcast.sessionId, { lastActivityAt: stoppedAt });
 	return toBroadcastResult({ ...broadcast, ...patch });
-});
+}
 
-export const stopBroadcast = Effect.fn("Broadcasts.stop")(function* (
+export async function abandonBroadcast(
+	ctx: MutationCtx,
+	broadcastId: Id<"broadcasts">,
+) {
+	return await terminalBroadcastTransition(ctx, {
+		kind: "abandon",
+		broadcastId,
+	});
+}
+
+export async function stopBroadcast(
 	ctx: MutationCtx,
 	args: {
 		broadcastId: Id<"broadcasts">;
 		finalCommitOrdinal?: number;
 	},
 ) {
-	const broadcast = yield* getOwnedBroadcast(ctx, args.broadcastId);
-	const finalCommitOrdinal =
-		args.finalCommitOrdinal === undefined
-			? broadcast.lastCommitOrdinal
-			: yield* validateFinalCommitOrdinal(args.finalCommitOrdinal);
-	const decision = classifyBroadcastTransition(broadcast, {
-		kind: "stop",
-		finalCommitOrdinal,
-	});
-	if (decision.kind === "noop") return toBroadcastResult(broadcast);
-	if (decision.kind === "checkDrain") {
-		const sealed = yield* maybeSealBroadcast(ctx, args.broadcastId);
-		return toBroadcastResult(sealed ?? broadcast);
-	}
-	if (decision.kind === "invalid") {
-		if (decision.reason === "invalid_state") {
-			return yield* Effect.die(new Error("Invalid Broadcast lifecycle state"));
-		}
-		return yield* transitionError(decision.reason);
-	}
-	if (decision.kind !== "transition") {
-		return yield* Effect.die(
-			new Error("Invalid Broadcast transition decision"),
-		);
-	}
-
-	const session = yield* getOwnedSession(
-		ctx,
-		broadcast.sessionId,
-		yield* getOperator(ctx),
-	);
-	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
-	}
-	const stoppedAt = yield* nowMillis();
-	const patch =
-		decision.status === "sealed"
-			? {
-					status: decision.status,
-					finalCommitOrdinal: decision.finalCommitOrdinal,
-					sealedAt: stoppedAt,
-				}
-			: {
-					status: decision.status,
-					finalCommitOrdinal: decision.finalCommitOrdinal,
-				};
-	yield* fromConvex(
-		() => ctx.db.patch(args.broadcastId, patch),
-		"Broadcasts.stop.patch",
-	);
-	yield* fromConvex(
-		() => ctx.db.patch(broadcast.sessionId, { lastActivityAt: stoppedAt }),
-		"Broadcasts.stop.updateSession",
-	);
-	return toBroadcastResult({ ...broadcast, ...patch });
-});
+	return await terminalBroadcastTransition(ctx, { kind: "stop", ...args });
+}
 
 export function toBroadcastResult(
 	broadcast: {
@@ -726,23 +627,21 @@ export function toBroadcastResult(
 }
 
 export function validateCommitOrdinal(value: unknown) {
-	return Schema.decodeUnknownEffect(positiveCommitOrdinalSchema)(value).pipe(
-		Effect.mapError(
-			() =>
-				new InvalidCommitOrdinal({
-					message: "Commit ordinal must be a positive integer",
-				}),
-		),
-	);
+	try {
+		return Schema.decodeUnknownSync(positiveCommitOrdinalSchema)(value);
+	} catch {
+		throw new InvalidCommitOrdinal({
+			message: "Commit ordinal must be a positive integer",
+		});
+	}
 }
 
 export function validateFinalCommitOrdinal(value: unknown) {
-	return Schema.decodeUnknownEffect(Schema.Natural)(value).pipe(
-		Effect.mapError(
-			() =>
-				new InvalidCommitOrdinal({
-					message: "Final commit ordinal must be a non-negative integer",
-				}),
-		),
-	);
+	try {
+		return Schema.decodeUnknownSync(Schema.Natural)(value);
+	} catch {
+		throw new InvalidCommitOrdinal({
+			message: "Final commit ordinal must be a non-negative integer",
+		});
+	}
 }

@@ -391,6 +391,36 @@ describe("Broadcast lifecycle", () => {
 		).resolves.toMatchObject({ sequence: 2 });
 	});
 
+	it("rejects abandoning a Broadcast that is already stopping", async () => {
+		const t = makeTest();
+		const { operator, sessionId } = await seedOperator(t);
+		const started = await operator.mutation(api.broadcasts.start, {
+			sessionId,
+		});
+
+		await t.run(async (ctx) =>
+			ctx.db.patch(sessionId, { audienceLanguages: ["en", "ja"] }),
+		);
+		await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId: started.broadcastId,
+			commitOrdinal: 1,
+			commitId: "abandon-stopping-1",
+			sourceText: "Pending",
+			sourceLanguage: "en",
+		});
+		await operator.mutation(api.broadcasts.stop, {
+			broadcastId: started.broadcastId,
+			finalCommitOrdinal: 1,
+		});
+
+		await expect(
+			operator.mutation(api.broadcasts.abandon, {
+				broadcastId: started.broadcastId,
+			}),
+		).rejects.toMatchObject({ data: { code: "broadcast_not_lost" } });
+	});
+
 	it("keeps deleted Session slugs permanently reserved", async () => {
 		vi.useFakeTimers();
 		const t = makeTest();
