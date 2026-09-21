@@ -10,7 +10,6 @@ import {
 	removeTranslationMappingDraftRow,
 	type TranslationMappingDraft,
 	updateTranslationMappingDraftRow,
-	validateTranslationMappingDraft,
 } from "./translationMappingDraft";
 
 const audienceCodes = ["en", "ja"];
@@ -57,35 +56,60 @@ describe("translation mapping draft", () => {
 	});
 
 	it("reports row-level issues while retaining rows outside the audience", () => {
-		const draft = validateTranslationMappingDraft(
-			draftWithRows([
-				{ id: "empty", term: "", targetLanguage: "", translation: "" },
-				{
-					id: "original",
-					term: "Echo",
-					targetLanguage: "ja",
-					translation: "エコー",
-				},
-				{ id: "partial", term: "Echo", targetLanguage: "ja", translation: "" },
-				{
-					id: "removed-language",
-					term: "Word",
-					targetLanguage: "de",
-					translation: "Wort",
-				},
-				{
-					id: "duplicate",
-					term: "echo",
-					targetLanguage: "JA",
-					translation: "反響",
-				},
-			]),
+		const authoredDraft = draftWithRows([
+			{ id: "empty", term: "", targetLanguage: "", translation: "" },
+			{
+				id: "original",
+				term: "Echo",
+				targetLanguage: "ja",
+				translation: "エコー",
+			},
+			{ id: "partial", term: "Echo", targetLanguage: "ja", translation: "" },
+			{
+				id: "removed-language",
+				term: "Word",
+				targetLanguage: "de",
+				translation: "Wort",
+			},
+			{
+				id: "duplicate",
+				term: "echo",
+				targetLanguage: "JA",
+				translation: "反響",
+			},
+		]);
+		const projection = projectTranslationMappingDraft(
+			authoredDraft,
 			audienceCodes,
 		);
 
-		expect(draft.rows).toHaveLength(5);
-		expect(draft.issues).toEqual(
-			expect.arrayContaining([
+		expect(authoredDraft.rows).toEqual([
+			{ id: "empty", term: "", targetLanguage: "", translation: "" },
+			{
+				id: "original",
+				term: "Echo",
+				targetLanguage: "ja",
+				translation: "エコー",
+			},
+			{ id: "partial", term: "Echo", targetLanguage: "ja", translation: "" },
+			{
+				id: "removed-language",
+				term: "Word",
+				targetLanguage: "de",
+				translation: "Wort",
+			},
+			{
+				id: "duplicate",
+				term: "echo",
+				targetLanguage: "JA",
+				translation: "反響",
+			},
+		]);
+
+		expect(authoredDraft.rows).toHaveLength(5);
+		expect(projection).toEqual({
+			ok: false,
+			issues: expect.arrayContaining([
 				{ rowId: "partial", field: "translation", code: "incomplete_row" },
 				{
 					rowId: "removed-language",
@@ -94,8 +118,9 @@ describe("translation mapping draft", () => {
 				},
 				{ rowId: "duplicate", field: "term", code: "duplicate_mapping" },
 			]),
-		);
-		expect(draft.issues).not.toEqual(
+		});
+		if (projection.ok) throw new Error("expected invalid mapping projection");
+		expect(projection.issues).not.toEqual(
 			expect.arrayContaining([
 				{ rowId: "empty", field: "term", code: "incomplete_row" },
 			]),
@@ -332,12 +357,15 @@ describe("translation mapping draft", () => {
 			baseMappings: [],
 			conflict: false,
 		});
-		expect(validateTranslationMappingDraft(reconciled, ["en"]).issues).toEqual([
-			{
-				rowId: "retained-1",
-				field: "targetLanguage",
-				code: "invalid_audience_language",
-			},
-		]);
+		expect(projectTranslationMappingDraft(reconciled, ["en"])).toEqual({
+			ok: false,
+			issues: [
+				{
+					rowId: "retained-1",
+					field: "targetLanguage",
+					code: "invalid_audience_language",
+				},
+			],
+		});
 	});
 });

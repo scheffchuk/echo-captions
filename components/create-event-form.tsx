@@ -61,7 +61,6 @@ import {
 	createTranslationMappingDraft,
 	projectTranslationMappingDraft,
 	type TranslationMappingDraftIssueCode,
-	validateTranslationMappingDraft,
 } from "@/src/lib/translationMappingDraft";
 
 const eventNameSchema = Schema.String.pipe(
@@ -740,17 +739,18 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 
 								<form.Field name="translationMappings">
 									{(mappingField) => {
-										const mappingDraft = validateTranslationMappingDraft(
+										const projection = projectTranslationMappingDraft(
 											createTranslationMappingDraft({
 												rows: [...mappingField.state.value],
 											}),
 											audienceCodes,
 										);
+										const issues = projection.ok ? [] : projection.issues;
 										return (
 											<TranslationMappingsField
-												mappings={mappingDraft.rows}
+												mappings={mappingField.state.value}
 												audienceCodes={audienceCodes}
-												issues={mappingDraft.issues}
+												issues={issues}
 												onChange={(mappings) =>
 													mappingField.handleChange(mappings)
 												}

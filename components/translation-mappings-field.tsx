@@ -89,7 +89,7 @@ export function TranslationMappingsField({
 	disabled = false,
 	idFactory = browserIdFactory,
 }: {
-	mappings: TranslationMapping[];
+	mappings: ReadonlyArray<TranslationMapping>;
 	audienceCodes: string[];
 	issues?: TranslationMappingDraftIssue[];
 	onChange: (mappings: TranslationMapping[]) => void;

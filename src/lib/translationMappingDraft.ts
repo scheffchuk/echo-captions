@@ -35,10 +35,6 @@ export type TranslationMappingDraft = {
 	conflict: boolean;
 };
 
-export type ValidatedTranslationMappingDraft = TranslationMappingDraft & {
-	issues: TranslationMappingDraftIssue[];
-};
-
 export type TranslationMappingIdFactory = () => string;
 
 export type TranslationMappingDraftProjection =
@@ -146,14 +142,6 @@ function issueFromPolicy(
 				? "targetLanguage"
 				: (policyIssue.field ?? "term");
 	return issue(rowId, field, code);
-}
-
-export function validateTranslationMappingDraft(
-	draft: TranslationMappingDraft,
-	audienceCodes: ReadonlyArray<string>,
-): ValidatedTranslationMappingDraft {
-	const projection = projectTranslationMappingDraft(draft, audienceCodes);
-	return { ...draft, issues: projection.ok ? [] : projection.issues };
 }
 
 function contentForComparison(
