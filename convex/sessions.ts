@@ -16,6 +16,8 @@ import { authErrorCodes, getCurrentOperatorId, getOperator } from "./lib/auth";
 import {
 	getBroadcastProjection,
 	getUnresolvedBroadcast,
+	type projectBroadcast,
+	readBroadcastProjection,
 } from "./lib/broadcasts";
 import {
 	computeAudienceLanguages,
@@ -247,34 +249,57 @@ const addLiveState = Effect.fn("Sessions.addLiveState")(function* (
 	ctx: QueryCtx,
 	session: Doc<"sessions">,
 ) {
-	let translationMappings: Doc<"translationMappingRevisions">["mappings"] = [];
-	if (session.translationMappingRevisionId) {
-		const mappingRevision = yield* fromConvex(
-			() =>
-				ctx.db.get(
-					"translationMappingRevisions",
-					session.translationMappingRevisionId as Id<"translationMappingRevisions">,
-				),
-			"Sessions.addLiveState.mappingRevision",
-		);
-		if (!mappingRevision || mappingRevision.sessionId !== session._id) {
-			return yield* Effect.die(
-				new Error("Session mapping revision is unavailable"),
-			);
-		}
-		translationMappings = mappingRevision.mappings;
-	}
+	const translationMappings = yield* fromConvex(
+		() => readSessionTranslationMappings(ctx, session),
+		"Sessions.addLiveState.mappingRevision",
+	);
 	const broadcastProjection = yield* getBroadcastProjection(
 		ctx,
 		session._id,
 		"owner",
 	);
+	return toSessionView(session, translationMappings, broadcastProjection);
+});
+
+async function readSessionTranslationMappings(
+	ctx: QueryCtx,
+	session: Doc<"sessions">,
+) {
+	if (!session.translationMappingRevisionId) return [];
+	const mappingRevision = await ctx.db.get(
+		"translationMappingRevisions",
+		session.translationMappingRevisionId as Id<"translationMappingRevisions">,
+	);
+	if (!mappingRevision || mappingRevision.sessionId !== session._id) {
+		throw new Error("Session mapping revision is unavailable");
+	}
+	return mappingRevision.mappings;
+}
+
+function toSessionView(
+	session: Doc<"sessions">,
+	translationMappings: Doc<"translationMappingRevisions">["mappings"],
+	broadcastProjection: ReturnType<typeof projectBroadcast>,
+) {
 	return {
 		...session,
 		translationMappings,
 		...broadcastProjection,
 	};
-});
+}
+
+async function getOwnedSessionView(ctx: QueryCtx, session: Doc<"sessions">) {
+	const translationMappings = await readSessionTranslationMappings(
+		ctx,
+		session,
+	);
+	const broadcastProjection = await readBroadcastProjection(
+		ctx,
+		session._id,
+		"owner",
+	);
+	return toSessionView(session, translationMappings, broadcastProjection);
+}
 
 const patchDescription = Effect.fn("Sessions.updateDescription")(function* (
 	ctx: MutationCtx,
@@ -715,7 +740,7 @@ export const getMineBySlug = query({
 			.withIndex("by_slug", (q) => q.eq("slug", args.slug))
 			.unique();
 		if (!session || session.ownerId !== ownerId) return null;
-		return await runConvex(addLiveState(ctx, session).pipe(Effect.orDie));
+		return await getOwnedSessionView(ctx, session);
 	},
 });
 

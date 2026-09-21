@@ -204,6 +204,52 @@ export function projectBroadcast(
 	};
 }
 
+export function assertValidBroadcastState(
+	broadcast: Doc<"broadcasts">,
+): Doc<"broadcasts"> {
+	const error = broadcastStateError(broadcast);
+	if (error !== null) {
+		throw new Error(error);
+	}
+	return broadcast;
+}
+
+async function readUnresolvedBroadcast(
+	ctx: BroadcastCtx,
+	sessionId: Id<"sessions">,
+): Promise<Doc<"broadcasts"> | null> {
+	let unresolved: Doc<"broadcasts"> | null = null;
+	for (const status of unresolvedBroadcastStatuses) {
+		const broadcasts = await ctx.db
+			.query("broadcasts")
+			.withIndex("by_session_id_and_status", (q) =>
+				q.eq("sessionId", sessionId).eq("status", status),
+			)
+			.take(2);
+		if (broadcasts.length > 1) {
+			throw new Error(
+				"Session has multiple Broadcasts in one unresolved state",
+			);
+		}
+		if (broadcasts[0]) {
+			if (unresolved) {
+				throw new Error("Session has multiple unresolved Broadcasts");
+			}
+			unresolved = assertValidBroadcastState(broadcasts[0]);
+		}
+	}
+	return unresolved;
+}
+
+export async function readBroadcastProjection(
+	ctx: BroadcastCtx,
+	sessionId: Id<"sessions">,
+	audience: BroadcastProjectionAudience,
+) {
+	const unresolved = await readUnresolvedBroadcast(ctx, sessionId);
+	return projectBroadcast(unresolved, audience);
+}
+
 export const getOwnedBroadcast = Effect.fn("Broadcasts.getOwned")(function* (
 	ctx: BroadcastCtx,
 	broadcastId: Id<"broadcasts">,
@@ -232,33 +278,10 @@ export const getOwnedBroadcast = Effect.fn("Broadcasts.getOwned")(function* (
 
 export const getUnresolvedBroadcast = Effect.fn("Broadcasts.getUnresolved")(
 	function* (ctx: BroadcastCtx, sessionId: Id<"sessions">) {
-		let unresolved: Doc<"broadcasts"> | null = null;
-		for (const status of unresolvedBroadcastStatuses) {
-			const broadcasts = yield* fromConvex(
-				() =>
-					ctx.db
-						.query("broadcasts")
-						.withIndex("by_session_id_and_status", (q) =>
-							q.eq("sessionId", sessionId).eq("status", status),
-						)
-						.take(2),
-				`Broadcasts.getUnresolved.${status}`,
-			);
-			if (broadcasts.length > 1) {
-				return yield* Effect.die(
-					new Error("Session has multiple Broadcasts in one unresolved state"),
-				);
-			}
-			if (broadcasts[0]) {
-				if (unresolved) {
-					return yield* Effect.die(
-						new Error("Session has multiple unresolved Broadcasts"),
-					);
-				}
-				unresolved = yield* validateBroadcastState(broadcasts[0]);
-			}
-		}
-		return unresolved;
+		return yield* fromConvex(
+			() => readUnresolvedBroadcast(ctx, sessionId),
+			"Broadcasts.getUnresolved",
+		);
 	},
 );
 
