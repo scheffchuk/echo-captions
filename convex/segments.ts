@@ -2,15 +2,13 @@ import {
 	paginationOptsValidator,
 	paginationResultValidator,
 } from "convex/server";
-import { v } from "convex/values";
-import { Effect, Schema } from "effect";
+import { ConvexError, v } from "convex/values";
+import { Schema } from "effect";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
-import { exhaustPublicErrors, fromConvex } from "./effect/convex";
-import { runConvex } from "./effect/run";
-import { authErrorCodes, getOperator } from "./lib/auth";
+import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
 import {
-	getOwnedSession,
+	getOwnedSessionNative,
 	SessionDeleting,
 	sessionErrorCodes,
 } from "./lib/sessions";
@@ -29,6 +27,34 @@ const publicErrorCodes = {
 	TranscriptTooLarge: "transcript_too_large",
 };
 
+type TaggedPublicError = {
+	readonly _tag: string;
+	readonly message: string;
+};
+
+function isTaggedPublicError(error: unknown): error is TaggedPublicError {
+	if (typeof error !== "object" || error === null) return false;
+	const candidate = error as { _tag?: unknown; message?: unknown };
+	return (
+		typeof candidate._tag === "string" && typeof candidate.message === "string"
+	);
+}
+
+async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
+	try {
+		return await operation();
+	} catch (error) {
+		if (isTaggedPublicError(error)) {
+			const code =
+				publicErrorCodes[error._tag as keyof typeof publicErrorCodes];
+			if (code !== undefined) {
+				throw new ConvexError({ code, message: error.message });
+			}
+		}
+		throw error;
+	}
+}
+
 const segmentValidator = v.object({
 	_id: v.id("segments"),
 	_creationTime: v.number(),
@@ -40,44 +66,37 @@ const segmentValidator = v.object({
 	error: v.optional(v.string()),
 });
 
-const readTranscriptText = Effect.fn("Segments.transcriptText")(function* (
-	ctx: QueryCtx,
-	sessionId: Id<"sessions">,
-) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, sessionId, ownerId);
+async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({
+		throw new SessionDeleting({
 			message: "Session is being deleted",
 		});
 	}
 
-	const segments = yield* fromConvex(
-		() =>
-			ctx.db
-				.query("segments")
-				.withIndex("by_session_id_and_sequence", (q) =>
-					q.eq("sessionId", sessionId),
-				)
-				.order("asc")
-				.take(MAX_TRANSCRIPT_SEGMENTS + 1),
-		"Segments.transcriptText.list",
-	);
+	const segments = await ctx.db
+		.query("segments")
+		.withIndex("by_session_id_and_sequence", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.order("asc")
+		.take(MAX_TRANSCRIPT_SEGMENTS + 1);
 	if (segments.length > MAX_TRANSCRIPT_SEGMENTS) {
-		return yield* new TranscriptTooLarge({
+		throw new TranscriptTooLarge({
 			message: "Transcript is too large to download",
 		});
 	}
 
 	const transcript = segments.map((segment) => segment.sourceText).join("\n");
 	if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-		return yield* new TranscriptTooLarge({
+		throw new TranscriptTooLarge({
 			message: "Transcript is too large to download",
 		});
 	}
 
 	return transcript;
-});
+}
 
 const toPublicSegment = (segment: Doc<"segments">) => ({
 	_id: segment._id,
@@ -96,48 +115,34 @@ export const listBySession = query({
 		paginationOpts: paginationOptsValidator,
 	},
 	returns: paginationResultValidator(segmentValidator),
-	handler: (ctx, args) =>
-		runConvex(
-			Effect.gen(function* () {
-				const session = yield* fromConvex(
-					() => ctx.db.get("sessions", args.sessionId),
-					"Segments.listBySession.getSession",
-				);
-				if (!session || session.deletionRequestedAt !== undefined) {
-					return {
-						page: [],
-						isDone: true,
-						continueCursor: "",
-						pageStatus: null,
-						splitCursor: null,
-					};
-				}
+	handler: async (ctx, args) => {
+		const session = await ctx.db.get("sessions", args.sessionId);
+		if (!session || session.deletionRequestedAt !== undefined) {
+			return {
+				page: [],
+				isDone: true,
+				continueCursor: "",
+				pageStatus: null,
+				splitCursor: null,
+			};
+		}
 
-				const page = yield* fromConvex(
-					() =>
-						ctx.db
-							.query("segments")
-							.withIndex("by_session_id_and_sequence", (q) =>
-								q.eq("sessionId", args.sessionId),
-							)
-							.order("desc")
-							.paginate(args.paginationOpts),
-					"Segments.listBySession.paginate",
-				);
-				return { ...page, page: page.page.map(toPublicSegment) };
-			}).pipe(Effect.orDie),
-		),
+		const page = await ctx.db
+			.query("segments")
+			.withIndex("by_session_id_and_sequence", (q) =>
+				q.eq("sessionId", args.sessionId),
+			)
+			.order("desc")
+			.paginate(args.paginationOpts);
+		return { ...page, page: page.page.map(toPublicSegment) };
+	},
 });
 
 export const transcriptText = query({
 	args: { sessionId: v.id("sessions") },
 	returns: v.string(),
-	handler: (ctx, args) =>
-		runConvex(
-			readTranscriptText(ctx, args.sessionId).pipe(
-				exhaustPublicErrors(publicErrorCodes),
-			),
-		),
+	handler: async (ctx, args) =>
+		atPublicEdge(() => readTranscriptText(ctx, args.sessionId)),
 });
 
 export { segmentValidator };
