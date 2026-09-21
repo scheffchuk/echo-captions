@@ -1,5 +1,6 @@
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
+import type { Id } from "@/convex/_generated/dataModel";
 import {
 	createRejectedCaptureOwner,
 	type RejectedCaptureOwner,
@@ -23,16 +24,17 @@ function deferred<A>() {
 function makeAdapters(
 	overrides: Partial<BroadcastCoordinatorAdapters> = {},
 ): BroadcastCoordinatorAdapters {
+	const broadcastId = "broadcast-1" as Id<"broadcasts">;
 	return {
 		connect: vi.fn(async () => 3),
 		disconnect: vi.fn(async () => undefined),
 		start: vi.fn(async () => ({
-			broadcastId: "broadcast-1",
+			broadcastId,
 			sequence: 4,
 			lastCommitOrdinal: 7,
 		})),
 		resume: vi.fn(async () => ({
-			broadcastId: "broadcast-1",
+			broadcastId,
 			sequence: 4,
 			lastCommitOrdinal: 7,
 		})),
@@ -65,7 +67,7 @@ function configureCoordinator(
 	adapters: BroadcastCoordinatorAdapters,
 ) {
 	coordinator.update({
-		sessionId,
+		sessionId: sessionId as Id<"sessions">,
 		recoverableBroadcastId: null,
 		adapters,
 	});
@@ -120,7 +122,7 @@ describe("Broadcast coordinator", () => {
 			capturedAt: 100,
 		});
 		activation.resolve({
-			broadcastId: "broadcast-1",
+			broadcastId: "broadcast-1" as Id<"broadcasts">,
 			sequence: 4,
 			lastCommitOrdinal: 7,
 		});
@@ -150,16 +152,16 @@ describe("Broadcast coordinator", () => {
 
 		await coordinator.run({ kind: "start" });
 		await coordinator.run({ kind: "stop" });
+		coordinator.offerCapture(capture("commit-stale-before-next-start", 3));
 		await coordinator.run({ kind: "start" });
 		coordinator.offerCapture(capture("commit-stale", 3));
 		coordinator.offerCapture(capture("commit-current", 4));
 		await vi.waitFor(() =>
-			expect(adapters.acceptCommit).toHaveBeenCalledOnce(),
+			expect(adapters.acceptCommit).toHaveBeenCalledWith(
+				expect.objectContaining({ commitId: "commit-current" }),
+			),
 		);
-
-		expect(adapters.acceptCommit).toHaveBeenCalledWith(
-			expect.objectContaining({ commitId: "commit-current" }),
-		);
+		expect(adapters.acceptCommit).toHaveBeenCalledOnce();
 		coordinator.dispose();
 	});
 
@@ -191,6 +193,27 @@ describe("Broadcast coordinator", () => {
 		expect(adapters.stop).toHaveBeenCalledWith({
 			broadcastId: "broadcast-1",
 		});
+		coordinator.dispose();
+	});
+
+	it("retains a capture delivered after the drain boundary as rejected", async () => {
+		const stopping = deferred<{ lastCommitOrdinal: number }>();
+		const adapters = makeAdapters({
+			stop: vi.fn(() => stopping.promise),
+		});
+		const coordinator = createBroadcastCoordinator();
+		configureCoordinator(coordinator, "session-stop-boundary", adapters);
+		await coordinator.run({ kind: "start" });
+
+		const stoppingCommand = coordinator.run({ kind: "stop" });
+		await vi.waitFor(() => expect(adapters.stop).toHaveBeenCalledOnce());
+		coordinator.offerCapture(capture("commit-after-drain", 3));
+		stopping.resolve({ lastCommitOrdinal: 7 });
+		await stoppingCommand;
+
+		expect(coordinator.snapshot().rejectedCaptures).toMatchObject([
+			{ commitId: "commit-after-drain" },
+		]);
 		coordinator.dispose();
 	});
 

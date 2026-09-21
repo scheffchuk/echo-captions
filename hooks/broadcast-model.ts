@@ -1,5 +1,6 @@
 import { ConvexError } from "convex/values";
-import { Effect, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
+import type { Id } from "@/convex/_generated/dataModel";
 
 const convexFailureDataSchema = Schema.Struct({
 	message: Schema.NonEmptyString,
@@ -29,7 +30,7 @@ export type BroadcastCommand = { kind: "start" } | { kind: "stop" };
 
 export type BroadcastCommandResult = {
 	kind: BroadcastCommand["kind"];
-	broadcastId: string;
+	broadcastId: Id<"broadcasts">;
 };
 
 export function createBroadcastCommandGate() {
@@ -80,15 +81,6 @@ export function toBroadcastCommandError(
 	}
 	throw error;
 }
-
-export const acceptCaptionCommit = Effect.fn("Broadcast.acceptCaptionCommit")(
-	function* <A>(accept: () => Promise<A>) {
-		return yield* Effect.tryPromise({
-			try: accept,
-			catch: toBroadcastCommandError,
-		});
-	},
-);
 
 export function ignorePresentedBroadcastError(error: unknown): void {
 	toBroadcastCommandError(error);

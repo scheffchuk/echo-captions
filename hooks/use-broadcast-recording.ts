@@ -72,19 +72,16 @@ export function useBroadcastRecording({
 			adapters: {
 				connect: realtime.connect,
 				disconnect: realtime.disconnect,
-				start: (nextSessionId) =>
-					startBroadcast({ sessionId: nextSessionId as Id<"sessions"> }),
-				resume: (broadcastId) =>
-					resumeBroadcast({ broadcastId: broadcastId as Id<"broadcasts"> }),
+				start: (nextSessionId) => startBroadcast({ sessionId: nextSessionId }),
+				resume: (broadcastId) => resumeBroadcast({ broadcastId }),
 				heartbeat: async (broadcastId) => {
-					await heartbeat({ broadcastId: broadcastId as Id<"broadcasts"> });
+					await heartbeat({ broadcastId });
 				},
-				stop: ({ broadcastId }) =>
-					stopBroadcast({ broadcastId: broadcastId as Id<"broadcasts"> }),
+				stop: ({ broadcastId }) => stopBroadcast({ broadcastId }),
 				acceptCommit: (args) =>
 					acceptCommit({
-						sessionId: args.sessionId as Id<"sessions">,
-						broadcastId: args.broadcastId as Id<"broadcasts">,
+						sessionId: args.sessionId,
+						broadcastId: args.broadcastId,
 						commitOrdinal: args.commitOrdinal,
 						commitId: args.commitId,
 						sourceText: args.sourceText,
