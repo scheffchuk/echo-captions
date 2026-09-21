@@ -33,11 +33,10 @@ import {
 	hydrateTranslationMappingDraft,
 	isTranslationMappingDraftDirty,
 	markTranslationMappingDraftConflict,
+	projectTranslationMappingDraft,
 	reconcileTranslationMappingDraft,
 	type TranslationMappingDraft,
 	type TranslationMappingIdFactory,
-	toUpdateInput,
-	validateTranslationMappingDraft,
 } from "@/src/lib/translationMappingDraft";
 import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
@@ -119,11 +118,16 @@ export function BroadcastGlossaryPanel({
 		audienceCodes,
 	]);
 
-	const validatedDraft = useMemo(
-		() => validateTranslationMappingDraft(draft, audienceCodes),
+	const projection = useMemo(
+		() => projectTranslationMappingDraft(draft, audienceCodes),
 		[draft, audienceCodes],
 	);
-	const isDirty = isTranslationMappingDraftDirty(draft, audienceCodes);
+	const issues = projection.ok ? [] : projection.issues;
+	const isDirty = isTranslationMappingDraftDirty(
+		draft,
+		audienceCodes,
+		projection,
+	);
 	const conflict = draft.conflict;
 
 	const discardAndClose = () => {
@@ -150,9 +154,8 @@ export function BroadcastGlossaryPanel({
 	};
 
 	const save = async () => {
-		const input = toUpdateInput(validatedDraft, audienceCodes);
+		const input = projection;
 		if (!input.ok) {
-			setDraft(validatedDraft);
 			return;
 		}
 
@@ -237,10 +240,8 @@ export function BroadcastGlossaryPanel({
 							key={sessionId}
 							mappings={draft.rows}
 							audienceCodes={audienceCodes}
-							issues={validatedDraft.issues}
-							onChange={(rows) =>
-								setDraft((current) => ({ ...current, rows, issues: [] }))
-							}
+							issues={issues}
+							onChange={(rows) => setDraft((current) => ({ ...current, rows }))}
 							disabled={saving}
 							idFactory={idFactory}
 						/>

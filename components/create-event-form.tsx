@@ -59,8 +59,8 @@ import {
 import { cn } from "@/lib/utils";
 import {
 	createTranslationMappingDraft,
+	projectTranslationMappingDraft,
 	type TranslationMappingDraftIssueCode,
-	toCreateInput,
 	validateTranslationMappingDraft,
 } from "@/src/lib/translationMappingDraft";
 
@@ -119,7 +119,7 @@ function createSessionInput(values: FormValues) {
 	const audienceCodes = Array.from(
 		new Set([...decoded.spokenLanguages, ...decoded.audienceLanguagesExtra]),
 	);
-	const mappingInput = toCreateInput(
+	const mappingInput = projectTranslationMappingDraft(
 		createTranslationMappingDraft({ rows: decoded.translationMappings }),
 		audienceCodes,
 	);

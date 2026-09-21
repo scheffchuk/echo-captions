@@ -71,7 +71,8 @@ export const canonicalizeTranslationMappings = Effect.fn(
 	audienceLanguages: ReadonlyArray<string>,
 ) {
 	const result = canonicalizeMappingPolicy(mappings, audienceLanguages);
-	if (!result.ok) return yield* fail(result.issue.message);
+	if (!result.ok)
+		return yield* fail(result.issues.map((issue) => issue.message).join(" "));
 	return result.mappings;
 });
 

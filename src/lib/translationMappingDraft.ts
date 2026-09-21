@@ -2,10 +2,7 @@ import { normalizeLanguageCode } from "../../shared/languages";
 import {
 	canonicalizeTranslationMappings,
 	canonicalTranslationMappingsEqual,
-	MAX_MAPPING_VALUE_CHARS,
-	MAX_TRANSLATION_MAPPINGS,
-	type MappingPolicyIssueCode,
-	mappingKey,
+	type MappingPolicyIssue,
 	normalizeTranslationMapping,
 	type StoredTranslationMapping,
 } from "./translationMappings";
@@ -35,8 +32,11 @@ export type TranslationMappingDraft = {
 	rows: TranslationMappingDraftRow[];
 	baseRevisionId: string | null;
 	baseMappings: StoredTranslationMapping[];
-	issues: TranslationMappingDraftIssue[];
 	conflict: boolean;
+};
+
+export type ValidatedTranslationMappingDraft = TranslationMappingDraft & {
+	issues: TranslationMappingDraftIssue[];
 };
 
 export type TranslationMappingIdFactory = () => string;
@@ -60,7 +60,6 @@ export function createTranslationMappingDraft({
 		rows: [...rows],
 		baseRevisionId,
 		baseMappings: [...baseMappings],
-		issues: [],
 		conflict: false,
 	};
 }
@@ -88,7 +87,6 @@ export function addTranslationMappingDraftRow(
 			...draft.rows,
 			{ id: idFactory(), term: "", targetLanguage: "", translation: "" },
 		],
-		issues: [],
 	};
 }
 
@@ -102,7 +100,6 @@ export function updateTranslationMappingDraftRow(
 		rows: draft.rows.map((row) =>
 			row.id === rowId ? { ...row, ...patch } : row,
 		),
-		issues: [],
 	};
 }
 
@@ -113,7 +110,6 @@ export function removeTranslationMappingDraftRow(
 	return {
 		...draft,
 		rows: draft.rows.filter((row) => row.id !== rowId),
-		issues: [],
 	};
 }
 
@@ -133,68 +129,31 @@ function rowIsBlank(row: StoredTranslationMapping): boolean {
 
 function issueFromPolicy(
 	rows: ReadonlyArray<TranslationMappingDraftRow>,
-	policyCode: MappingPolicyIssueCode,
-	index: number | undefined,
+	policyIssue: MappingPolicyIssue,
 ): TranslationMappingDraftIssue {
 	const rowId =
-		index === undefined
+		policyIssue.index === undefined
 			? DRAFT_ISSUE_ROW
-			: (rows[index]?.id ?? DRAFT_ISSUE_ROW);
+			: (rows[policyIssue.index]?.id ?? DRAFT_ISSUE_ROW);
 	const code =
-		policyCode === "incomplete_mapping" ? "incomplete_row" : policyCode;
+		policyIssue.code === "incomplete_mapping"
+			? "incomplete_row"
+			: policyIssue.code;
 	const field =
 		code === "translation_too_long"
 			? "translation"
 			: code === "invalid_audience_language"
 				? "targetLanguage"
-				: "term";
+				: (policyIssue.field ?? "term");
 	return issue(rowId, field, code);
 }
 
 export function validateTranslationMappingDraft(
 	draft: TranslationMappingDraft,
 	audienceCodes: ReadonlyArray<string>,
-): TranslationMappingDraft {
-	const issues: TranslationMappingDraftIssue[] = [];
-	const audience = new Set(audienceCodes.map(normalizeLanguageCode));
-	const seen = new Set<string>();
-	const nonBlankRows = draft.rows.filter((row) => !rowIsBlank(row));
-
-	if (nonBlankRows.length > MAX_TRANSLATION_MAPPINGS) {
-		issues.push(issue(DRAFT_ISSUE_ROW, "term", "too_many_mappings"));
-	}
-
-	for (const row of draft.rows) {
-		if (rowIsBlank(row)) continue;
-		const mapping = normalizeTranslationMapping(row);
-		if (!mapping.term || !mapping.targetLanguage || !mapping.translation) {
-			const field = !mapping.term
-				? "term"
-				: !mapping.targetLanguage
-					? "targetLanguage"
-					: "translation";
-			issues.push(issue(row.id, field, "incomplete_row"));
-			continue;
-		}
-		if (!audience.has(mapping.targetLanguage)) {
-			issues.push(issue(row.id, "targetLanguage", "invalid_audience_language"));
-		}
-		if (Array.from(mapping.term).length > MAX_MAPPING_VALUE_CHARS) {
-			issues.push(issue(row.id, "term", "term_too_long"));
-		}
-		if (Array.from(mapping.translation).length > MAX_MAPPING_VALUE_CHARS) {
-			issues.push(issue(row.id, "translation", "translation_too_long"));
-		}
-		const key = mappingKey(mapping);
-		if (seen.has(key)) {
-			issues.push(issue(row.id, "term", "duplicate_mapping"));
-		} else {
-			seen.add(key);
-		}
-	}
-
-	if (draft.conflict) issues.push(issue(DRAFT_ISSUE_ROW, "term", "conflict"));
-	return { ...draft, issues };
+): ValidatedTranslationMappingDraft {
+	const projection = projectTranslationMappingDraft(draft, audienceCodes);
+	return { ...draft, issues: projection.ok ? [] : projection.issues };
 }
 
 function contentForComparison(
@@ -221,11 +180,13 @@ function mappingsMatch(
 export function isTranslationMappingDraftDirty(
 	draft: TranslationMappingDraft,
 	audienceCodes?: ReadonlyArray<string>,
+	projection?: TranslationMappingDraftProjection,
 ): boolean {
 	if (draft.conflict) return true;
 	if (audienceCodes !== undefined) {
-		const validated = validateTranslationMappingDraft(draft, audienceCodes);
-		if (validated.issues.length > 0) return true;
+		const projected =
+			projection ?? projectTranslationMappingDraft(draft, audienceCodes);
+		if (!projected.ok) return true;
 	}
 	return !canonicalTranslationMappingsEqual(
 		contentForComparison(draft.rows),
@@ -233,38 +194,28 @@ export function isTranslationMappingDraftDirty(
 	);
 }
 
-function projection(
+export function projectTranslationMappingDraft(
 	draft: TranslationMappingDraft,
 	audienceCodes: ReadonlyArray<string>,
 ): TranslationMappingDraftProjection {
-	const validated = validateTranslationMappingDraft(draft, audienceCodes);
-	if (validated.issues.length > 0)
-		return { ok: false, issues: validated.issues };
-
-	const result = canonicalizeTranslationMappings(validated.rows, audienceCodes);
+	const result = canonicalizeTranslationMappings(
+		draft.rows.map(({ id: _id, ...mapping }) => mapping),
+		audienceCodes,
+	);
 	if (!result.ok) {
+		const issues = result.issues.map((policyIssue) =>
+			issueFromPolicy(draft.rows, policyIssue),
+		);
+		if (draft.conflict) issues.push(issue(DRAFT_ISSUE_ROW, "term", "conflict"));
+		return { ok: false, issues };
+	}
+	if (draft.conflict) {
 		return {
 			ok: false,
-			issues: [
-				issueFromPolicy(validated.rows, result.issue.code, result.issue.index),
-			],
+			issues: [issue(DRAFT_ISSUE_ROW, "term", "conflict")],
 		};
 	}
 	return { ok: true, mappings: result.mappings };
-}
-
-export function toCreateInput(
-	draft: TranslationMappingDraft,
-	audienceCodes: ReadonlyArray<string>,
-): TranslationMappingDraftProjection {
-	return projection(draft, audienceCodes);
-}
-
-export function toUpdateInput(
-	draft: TranslationMappingDraft,
-	audienceCodes: ReadonlyArray<string>,
-): TranslationMappingDraftProjection {
-	return projection(draft, audienceCodes);
 }
 
 export function reconcileTranslationMappingDraft(

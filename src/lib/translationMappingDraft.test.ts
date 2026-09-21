@@ -5,11 +5,10 @@ import {
 	hydrateTranslationMappingDraft,
 	isTranslationMappingDraftDirty,
 	markTranslationMappingDraftConflict,
+	projectTranslationMappingDraft,
 	reconcileTranslationMappingDraft,
 	removeTranslationMappingDraftRow,
 	type TranslationMappingDraft,
-	toCreateInput,
-	toUpdateInput,
 	updateTranslationMappingDraftRow,
 	validateTranslationMappingDraft,
 } from "./translationMappingDraft";
@@ -114,14 +113,122 @@ describe("translation mapping draft", () => {
 			},
 		]);
 
-		expect(toCreateInput(draft, audienceCodes)).toEqual({
+		expect(projectTranslationMappingDraft(draft, audienceCodes)).toEqual({
 			ok: true,
 			mappings: [{ term: "café", targetLanguage: "ja", translation: "カフェ" }],
 		});
-		expect(toUpdateInput(draft, audienceCodes)).toEqual({
-			ok: true,
-			mappings: [{ term: "café", targetLanguage: "ja", translation: "カフェ" }],
+	});
+
+	it("projects every policy issue back to its authored row and field", () => {
+		const draft = draftWithRows([
+			{ id: "blank", term: "", targetLanguage: "", translation: "" },
+			{ id: "partial", term: "Echo", targetLanguage: "ja", translation: "" },
+			{
+				id: "audience",
+				term: "Word",
+				targetLanguage: "de",
+				translation: "Wort",
+			},
+			{
+				id: "long-term",
+				term: "x".repeat(201),
+				targetLanguage: "ja",
+				translation: "長い",
+			},
+			{
+				id: "long-translation",
+				term: "Long",
+				targetLanguage: "ja",
+				translation: "x".repeat(201),
+			},
+			{
+				id: "valid",
+				term: "  Echo ",
+				targetLanguage: "JA-JP",
+				translation: "  エコー ",
+			},
+			{
+				id: "duplicate",
+				term: "echo",
+				targetLanguage: "JA-JP",
+				translation: "反響",
+			},
+		]);
+
+		expect(projectTranslationMappingDraft(draft, audienceCodes)).toEqual({
+			ok: false,
+			issues: [
+				{ rowId: "partial", field: "translation", code: "incomplete_row" },
+				{
+					rowId: "audience",
+					field: "targetLanguage",
+					code: "invalid_audience_language",
+				},
+				{ rowId: "long-term", field: "term", code: "term_too_long" },
+				{
+					rowId: "long-translation",
+					field: "translation",
+					code: "translation_too_long",
+				},
+				{ rowId: "duplicate", field: "term", code: "duplicate_mapping" },
+			],
 		});
+	});
+
+	it("reports multiple applicable issues on the same row", () => {
+		const projection = projectTranslationMappingDraft(
+			draftWithRows([
+				{
+					id: "saved",
+					term: "Echo",
+					targetLanguage: "ja",
+					translation: "エコー",
+				},
+				{
+					id: "invalid",
+					term: " Echo ",
+					targetLanguage: "JA-JP",
+					translation: "x".repeat(201),
+				},
+			]),
+			audienceCodes,
+		);
+
+		expect(projection).toEqual({
+			ok: false,
+			issues: [
+				{
+					rowId: "invalid",
+					field: "translation",
+					code: "translation_too_long",
+				},
+				{ rowId: "invalid", field: "term", code: "duplicate_mapping" },
+			],
+		});
+	});
+
+	it("omits blank rows without counting them against the mapping limit", () => {
+		const rows = Array.from({ length: 100 }, (_, index) => ({
+			id: `mapping-${index}`,
+			term: `Term ${index}`,
+			targetLanguage: "ja",
+			translation: `語${index}`,
+		}));
+
+		const projection = projectTranslationMappingDraft(
+			draftWithRows([
+				...rows,
+				{ id: "blank", term: " ", targetLanguage: " ", translation: " " },
+			]),
+			audienceCodes,
+		);
+
+		expect(projection).toMatchObject({ ok: true });
+		if (!projection.ok) throw new Error("expected valid mappings");
+		expect(projection.mappings).toHaveLength(100);
+		expect(projection.mappings).not.toContainEqual(
+			expect.objectContaining({ id: "blank" }),
+		);
 	});
 
 	it("compares canonical content instead of editor row order", () => {
@@ -145,25 +252,22 @@ describe("translation mapping draft", () => {
 
 		expect(isTranslationMappingDraftDirty(draft, audienceCodes)).toBe(false);
 		expect(
-			toUpdateInput(createTranslationMappingDraft(), audienceCodes),
+			projectTranslationMappingDraft(
+				createTranslationMappingDraft(),
+				audienceCodes,
+			),
 		).toEqual({
 			ok: true,
 			mappings: [],
 		});
 	});
 
-	it("rejects partial rows in both persistence projections", () => {
+	it("rejects partial rows in the persistence projection", () => {
 		const draft = draftWithRows([
 			{ id: "partial", term: "Echo", targetLanguage: "ja", translation: "" },
 		]);
 
-		expect(toCreateInput(draft, audienceCodes)).toEqual({
-			ok: false,
-			issues: [
-				{ rowId: "partial", field: "translation", code: "incomplete_row" },
-			],
-		});
-		expect(toUpdateInput(draft, audienceCodes)).toEqual({
+		expect(projectTranslationMappingDraft(draft, audienceCodes)).toEqual({
 			ok: false,
 			issues: [
 				{ rowId: "partial", field: "translation", code: "incomplete_row" },

@@ -81,6 +81,21 @@ describe("BroadcastGlossaryPanel", () => {
 		});
 	});
 
+	it("shows row feedback and does not persist an incomplete mapping", async () => {
+		const user = userEvent.setup();
+		render(<GlossaryHarness />);
+
+		await user.click(screen.getByRole("button", { name: "Add mapping" }));
+		const terms = screen.getAllByPlaceholderText("e.g. shici");
+		await user.type(terms[terms.length - 1] as HTMLElement, "Local");
+		await user.click(screen.getByRole("button", { name: "Save glossary" }));
+
+		expect(
+			screen.getByText("Complete this mapping or remove the row."),
+		).toBeInTheDocument();
+		expect(mocks.updateMappings).not.toHaveBeenCalled();
+	});
+
 	it("asks before discarding draft edits", async () => {
 		const user = userEvent.setup();
 		render(<GlossaryHarness />);
