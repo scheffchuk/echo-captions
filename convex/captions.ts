@@ -4,7 +4,7 @@ import {
 	paginationResultValidator,
 } from "convex/server";
 import { ConvexError, v } from "convex/values";
-import { Effect, Layer, ManagedRuntime, Random, Result } from "effect";
+import { Effect, Layer, ManagedRuntime, Random } from "effect";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -17,7 +17,6 @@ import {
 	query,
 } from "./_generated/server";
 import { convexConfigLayer } from "./effect/config";
-import { fromConvex } from "./effect/convex";
 import {
 	completeAcceptedCommit,
 	type TargetCompletion,
@@ -582,65 +581,64 @@ export const translateTarget = internalAction({
 				retryAfterMillis?: number;
 		  }
 	> => {
-		const program = Effect.gen(function* () {
-			const target = yield* fromConvex(
-				(): Promise<TargetContext> =>
-					ctx.runQuery(internal.captions.getTargetForAction, args),
-				"Captions.translateTarget.getTarget",
+		const target: TargetContext = await ctx.runQuery(
+			internal.captions.getTargetForAction,
+			args,
+		);
+		if (!target) {
+			return failedTargetResult(
+				args.targetId,
+				"unknown",
+				"Translation target is unavailable",
 			);
-			if (!target) {
-				return failedTargetResult(
-					args.targetId,
-					"unknown",
-					"Translation target is unavailable",
-				);
-			}
-			if (target.status !== "pending") {
-				return failedTargetResult(
-					target.targetId,
-					target.targetLanguage,
-					"Translation target is no longer pending",
-				);
-			}
-			if (target.priority === "retry") {
-				const liveWorkPending: boolean = yield* fromConvex(
-					() => ctx.runQuery(internal.captions.hasPendingLiveTargets, {}),
-					"Captions.translateTarget.checkLivePriority",
-				);
-				if (liveWorkPending) {
-					return deferredTargetResult(target.targetId, target.targetLanguage);
-				}
-			}
-
-			let mappings: Doc<"translationMappingRevisions">["mappings"] = [];
-			if (target.translationMappingRevisionId) {
-				const revision = yield* fromConvex(
-					() =>
-						ctx.runQuery(internal.mappingRevisions.getForAction, {
-							revisionId:
-								target.translationMappingRevisionId as Id<"translationMappingRevisions">,
-						}),
-					"Captions.translateTarget.getMappingRevision",
-				);
-				if (!revision) {
-					return failedTargetResult(
-						target.targetId,
-						target.targetLanguage,
-						"Translation mapping revision is unavailable",
-					);
-				}
-				mappings = revision.mappings;
-			}
-			const [document] = makeTranslationDocuments(target.sourceText, mappings, [
+		}
+		if (target.status !== "pending") {
+			return failedTargetResult(
+				target.targetId,
 				target.targetLanguage,
-			]);
-			if (!document) {
+				"Translation target is no longer pending",
+			);
+		}
+		if (target.priority === "retry") {
+			const liveWorkPending: boolean = await ctx.runQuery(
+				internal.captions.hasPendingLiveTargets,
+				{},
+			);
+			if (liveWorkPending) {
+				return deferredTargetResult(target.targetId, target.targetLanguage);
+			}
+		}
+
+		let mappings: Doc<"translationMappingRevisions">["mappings"] = [];
+		if (target.translationMappingRevisionId) {
+			const revision = await ctx.runQuery(
+				internal.mappingRevisions.getForAction,
+				{
+					revisionId:
+						target.translationMappingRevisionId as Id<"translationMappingRevisions">,
+				},
+			);
+			if (!revision) {
 				return failedTargetResult(
 					target.targetId,
 					target.targetLanguage,
-					"Translation document is unavailable",
+					"Translation mapping revision is unavailable",
 				);
 			}
+			mappings = revision.mappings;
+		}
+		const [document] = makeTranslationDocuments(target.sourceText, mappings, [
+			target.targetLanguage,
+		]);
+		if (!document) {
+			return failedTargetResult(
+				target.targetId,
+				target.targetLanguage,
+				"Translation document is unavailable",
+			);
+		}
+
+		const program = Effect.gen(function* () {
 			const google = yield* GoogleTranslate;
 			return yield* google.translateOne(document, target.sourceLanguage).pipe(
 				Effect.map((translation) => ({
@@ -708,11 +706,8 @@ export const translateTarget = internalAction({
 			);
 		});
 
-		const result = await runtime.runPromise(Effect.result(program));
-		if (Result.isSuccess(result)) return result.success;
-
-		// Workpool owns durable retries for unexpected operational failures.
-		throw new Error(result.failure.message);
+		// Workpool owns durable retries for unexpected provider defects.
+		return runtime.runPromise(program);
 	},
 });
 

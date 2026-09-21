@@ -12,8 +12,6 @@ import type * as auth from "../auth.js";
 import type * as broadcasts from "../broadcasts.js";
 import type * as captions from "../captions.js";
 import type * as effect_config from "../effect/config.js";
-import type * as effect_convex from "../effect/convex.js";
-import type * as effect_run from "../effect/run.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_broadcasts from "../lib/broadcasts.js";
@@ -41,8 +39,6 @@ declare const fullApi: ApiFromModules<{
   broadcasts: typeof broadcasts;
   captions: typeof captions;
   "effect/config": typeof effect_config;
-  "effect/convex": typeof effect_convex;
-  "effect/run": typeof effect_run;
   http: typeof http;
   "lib/auth": typeof lib_auth;
   "lib/broadcasts": typeof lib_broadcasts;

@@ -5,7 +5,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { requireCurrentOperatorId, Unauthorized } from "./auth";
 import {
-	getOwnedSessionNative,
+	getOwnedSession,
 	SessionBusy,
 	SessionDeleting,
 	SessionNotFound,
@@ -376,7 +376,7 @@ export async function startBroadcast(
 	sessionId: Id<"sessions">,
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -488,11 +488,7 @@ export async function resumeBroadcast(
 	}
 	if (decision.kind === "noop") return toBroadcastResult(broadcast);
 
-	const session = await getOwnedSessionNative(
-		ctx,
-		broadcast.sessionId,
-		ownerId,
-	);
+	const session = await getOwnedSession(ctx, broadcast.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -560,11 +556,7 @@ async function terminalBroadcastTransition(
 		throw new Error("Invalid Broadcast transition decision");
 	}
 
-	const session = await getOwnedSessionNative(
-		ctx,
-		broadcast.sessionId,
-		ownerId,
-	);
+	const session = await getOwnedSession(ctx, broadcast.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}

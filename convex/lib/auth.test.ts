@@ -1,10 +1,9 @@
 // @vitest-environment edge-runtime
 
-import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
-import { getOperator } from "./auth";
+import { requireCurrentOperatorId } from "./auth";
 
 const operatorId = "users:operator" as Id<"users">;
 const sessionId = "authSessions:session";
@@ -39,35 +38,31 @@ function storedUser(userId: Id<"users">): Doc<"users"> {
 	} as Doc<"users">;
 }
 
-describe("getOperator", () => {
+describe("requireCurrentOperatorId", () => {
 	it("denies an unauthenticated caller", async () => {
 		await expect(
-			Effect.runPromise(getOperator(makeContext({}))),
+			requireCurrentOperatorId(makeContext({})),
 		).rejects.toMatchObject({ _tag: "NotAuthenticated" });
 	});
 
 	it("denies a deleted account", async () => {
 		await expect(
-			Effect.runPromise(
-				getOperator(
-					makeContext({
-						identityUserId: operatorId,
-						user: null,
-					}),
-				),
+			requireCurrentOperatorId(
+				makeContext({
+					identityUserId: operatorId,
+					user: null,
+				}),
 			),
 		).rejects.toMatchObject({ _tag: "NotAuthenticated" });
 	});
 
 	it("returns the signed-in user id", async () => {
 		await expect(
-			Effect.runPromise(
-				getOperator(
-					makeContext({
-						identityUserId: operatorId,
-						user: storedUser(operatorId),
-					}),
-				),
+			requireCurrentOperatorId(
+				makeContext({
+					identityUserId: operatorId,
+					user: storedUser(operatorId),
+				}),
 			),
 		).resolves.toBe(operatorId);
 	});

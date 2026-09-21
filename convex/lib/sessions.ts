@@ -1,7 +1,6 @@
-import { Clock, Effect, Schema } from "effect";
+import { Schema } from "effect";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { fromConvex, PersistenceError } from "../effect/convex";
 import { Unauthorized } from "./auth";
 
 export class SessionNotFound extends Schema.TaggedError<SessionNotFound>()(
@@ -31,7 +30,7 @@ export const sessionErrorCodes = {
 	SessionNotFound: "session_not_found",
 } as const;
 
-export async function getOwnedSessionNative(
+export async function getOwnedSession(
 	ctx: QueryCtx | MutationCtx,
 	sessionId: Id<"sessions">,
 	ownerId: Id<"users">,
@@ -46,26 +45,6 @@ export async function getOwnedSessionNative(
 	return session;
 }
 
-export const getOwnedSession = Effect.fn("Sessions.getOwned")(function* (
-	ctx: QueryCtx | MutationCtx,
-	sessionId: Id<"sessions">,
-	ownerId: Id<"users">,
-) {
-	return yield* Effect.tryPromise({
-		try: () => getOwnedSessionNative(ctx, sessionId, ownerId),
-		catch: (cause) => {
-			if (cause instanceof SessionNotFound || cause instanceof Unauthorized) {
-				return cause;
-			}
-			return new PersistenceError({
-				operation: "Sessions.getOwned",
-				message: "Sessions.getOwned failed",
-				cause,
-			});
-		},
-	});
-});
-
 export function generateSlug(): string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
 	let slug = "";
@@ -75,9 +54,7 @@ export function generateSlug(): string {
 	return slug;
 }
 
-export async function uniqueSessionSlugNative(
-	ctx: MutationCtx,
-): Promise<string> {
+export async function uniqueSessionSlug(ctx: MutationCtx): Promise<string> {
 	while (true) {
 		const slug = generateSlug();
 		const existingSession = await ctx.db
@@ -93,16 +70,3 @@ export async function uniqueSessionSlugNative(
 		}
 	}
 }
-
-export const uniqueSessionSlug = Effect.fn("Sessions.uniqueSlug")(function* (
-	ctx: MutationCtx,
-) {
-	return yield* fromConvex(
-		() => uniqueSessionSlugNative(ctx),
-		"Sessions.uniqueSlug",
-	);
-});
-
-export const nowMillis = Effect.fn("Sessions.nowMillis")(function* () {
-	return yield* Clock.currentTimeMillis;
-});

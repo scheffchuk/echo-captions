@@ -20,8 +20,8 @@ Completed on 2026-09-02. This record now describes the architecture that is in p
 - Upgrade to the newest mutually compatible Effect v4 prerelease and `@effect/atom-react`, pinned to the same exact version.
 - Add exact compatible versions of TanStack Form and the selected Workpool and HTML-parser dependencies.
 - Reread the installed Effect guidance after the upgrade and migrate current Effect imports before feature work proceeds.
-- Make Convex action entries own narrow module-scoped runtimes; make the final runner accept only effects with exhausted dependencies and errors.
-- Collocate tagged errors, require names on wrapped Convex operations, delete shallow forwarding interfaces, and decode provider configuration during layer acquisition.
+- Make provider-facing Convex action entries own narrow module-scoped runtimes; keep ordinary Convex persistence in native async execution.
+- Collocate tagged errors, translate expected failures at registered public edges, delete shallow forwarding interfaces, and decode provider configuration during layer acquisition.
 - Prove Google signing and Scribe token acquisition in Convex's default runtime, then remove `"use node"` where verified.
 
 Verification gate: Effect unit tests, provider HTTP tests, Convex code generation and type checking, production build, and redacted provider smoke tests.

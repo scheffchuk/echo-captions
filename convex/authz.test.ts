@@ -110,7 +110,11 @@ describe("public Convex authorization boundaries", () => {
 	it("protects direct actions without an authenticated Operator", async () => {
 		const t = convexTest(schema, modules);
 
-		await expect(t.action(api.scribe.getScribeToken, {})).rejects.toThrow();
+		await expect(t.action(api.scribe.getScribeToken, {})).rejects.toMatchObject(
+			{
+				data: { code: "not_authenticated" },
+			},
+		);
 	});
 
 	it("denies a missing or deleted identity", async () => {

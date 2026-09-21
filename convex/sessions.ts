@@ -26,12 +26,12 @@ import {
 	validateSpokenLanguages,
 } from "./lib/languages";
 import {
-	getOwnedSessionNative,
+	getOwnedSession,
 	InvalidSessionTransition,
 	SessionBusy,
 	SessionDeleting,
 	sessionErrorCodes,
-	uniqueSessionSlugNative,
+	uniqueSessionSlug,
 } from "./lib/sessions";
 import {
 	canonicalizeTranslationMappings,
@@ -188,7 +188,7 @@ async function createSession(
 		args.translationMappings ?? [],
 		audienceLanguages,
 	);
-	const slug = await uniqueSessionSlugNative(ctx);
+	const slug = await uniqueSessionSlug(ctx);
 	const reservedAt = Date.now();
 
 	const {
@@ -276,7 +276,7 @@ async function patchDescription(
 	description: string,
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -295,7 +295,7 @@ async function patchTranslationMappings(
 	},
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, args.sessionId, ownerId);
+	const session = await getOwnedSession(ctx, args.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -343,7 +343,7 @@ async function patchLanguages(
 	},
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, args.sessionId, ownerId);
+	const session = await getOwnedSession(ctx, args.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -389,7 +389,7 @@ async function patchTitle(
 	title: string,
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
@@ -401,7 +401,7 @@ async function patchTitle(
 
 async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) return null;
 
 	const broadcastProjection = await readBroadcastProjection(

@@ -8,7 +8,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
 import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
 import {
-	getOwnedSessionNative,
+	getOwnedSession,
 	SessionDeleting,
 	sessionErrorCodes,
 } from "./lib/sessions";
@@ -68,7 +68,7 @@ const segmentValidator = v.object({
 
 async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({
 			message: "Session is being deleted",
