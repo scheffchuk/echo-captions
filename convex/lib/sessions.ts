@@ -1,7 +1,7 @@
 import { Clock, Effect, Schema } from "effect";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { fromConvex } from "../effect/convex";
+import { fromConvex, PersistenceError } from "../effect/convex";
 import { Unauthorized } from "./auth";
 
 export class SessionNotFound extends Schema.TaggedError<SessionNotFound>()(
@@ -31,22 +31,39 @@ export const sessionErrorCodes = {
 	SessionNotFound: "session_not_found",
 } as const;
 
+export async function getOwnedSessionNative(
+	ctx: QueryCtx | MutationCtx,
+	sessionId: Id<"sessions">,
+	ownerId: Id<"users">,
+) {
+	const session = await ctx.db.get("sessions", sessionId);
+	if (!session) {
+		throw new SessionNotFound({ message: "Session not found" });
+	}
+	if (session.ownerId !== ownerId) {
+		throw new Unauthorized({ message: "Unauthorized" });
+	}
+	return session;
+}
+
 export const getOwnedSession = Effect.fn("Sessions.getOwned")(function* (
 	ctx: QueryCtx | MutationCtx,
 	sessionId: Id<"sessions">,
 	ownerId: Id<"users">,
 ) {
-	const session = yield* fromConvex(
-		() => ctx.db.get("sessions", sessionId),
-		"Sessions.getOwned",
-	);
-	if (!session) {
-		return yield* new SessionNotFound({ message: "Session not found" });
-	}
-	if (session.ownerId !== ownerId) {
-		return yield* new Unauthorized({ message: "Unauthorized" });
-	}
-	return session;
+	return yield* Effect.tryPromise({
+		try: () => getOwnedSessionNative(ctx, sessionId, ownerId),
+		catch: (cause) => {
+			if (cause instanceof SessionNotFound || cause instanceof Unauthorized) {
+				return cause;
+			}
+			return new PersistenceError({
+				operation: "Sessions.getOwned",
+				message: "Sessions.getOwned failed",
+				cause,
+			});
+		},
+	});
 });
 
 export function generateSlug(): string {
@@ -58,31 +75,32 @@ export function generateSlug(): string {
 	return slug;
 }
 
-export const uniqueSessionSlug = Effect.fn("Sessions.uniqueSlug")(function* (
+export async function uniqueSessionSlugNative(
 	ctx: MutationCtx,
-) {
+): Promise<string> {
 	while (true) {
 		const slug = generateSlug();
-		const existingSession = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("sessions")
-					.withIndex("by_slug", (q) => q.eq("slug", slug))
-					.unique(),
-			"Sessions.uniqueSlug",
-		);
-		const existingReservation = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("sessionSlugs")
-					.withIndex("by_slug", (q) => q.eq("slug", slug))
-					.unique(),
-			"Sessions.uniqueSlug.reservation",
-		);
+		const existingSession = await ctx.db
+			.query("sessions")
+			.withIndex("by_slug", (q) => q.eq("slug", slug))
+			.unique();
+		const existingReservation = await ctx.db
+			.query("sessionSlugs")
+			.withIndex("by_slug", (q) => q.eq("slug", slug))
+			.unique();
 		if (!existingSession && !existingReservation) {
 			return slug;
 		}
 	}
+}
+
+export const uniqueSessionSlug = Effect.fn("Sessions.uniqueSlug")(function* (
+	ctx: MutationCtx,
+) {
+	return yield* fromConvex(
+		() => uniqueSessionSlugNative(ctx),
+		"Sessions.uniqueSlug",
+	);
 });
 
 export const nowMillis = Effect.fn("Sessions.nowMillis")(function* () {

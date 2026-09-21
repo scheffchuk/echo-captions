@@ -7,7 +7,7 @@ export {
 	toGoogleCode,
 } from "../../shared/languages";
 
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import {
 	fromScribeCode,
 	isValidLanguageCode,
@@ -68,46 +68,43 @@ export function resolveSourceLanguage(
 	return fallback;
 }
 
-export const validateSpokenLanguages = Effect.fn("Languages.validateSpoken")(
-	function* (spokenLanguages: string[]) {
-		const normalized = normalizeLanguageList(spokenLanguages);
-		if (normalized.length < 1) {
-			return yield* new InvalidLanguage({
-				message: "Add at least one spoken language",
+export function validateSpokenLanguages(spokenLanguages: string[]) {
+	const normalized = normalizeLanguageList(spokenLanguages);
+	if (normalized.length < 1) {
+		throw new InvalidLanguage({ message: "Add at least one spoken language" });
+	}
+	if (normalized.length > MAX_SPOKEN_LANGUAGES) {
+		throw new InvalidLanguage({
+			message: `At most ${MAX_SPOKEN_LANGUAGES} spoken languages`,
+		});
+	}
+	for (const code of normalized) {
+		if (!isValidLanguageCode(code)) {
+			throw new InvalidLanguage({
+				message: `Unsupported language code: ${code}`,
 			});
 		}
-		if (normalized.length > MAX_SPOKEN_LANGUAGES) {
-			return yield* new InvalidLanguage({
-				message: `At most ${MAX_SPOKEN_LANGUAGES} spoken languages`,
-			});
-		}
-		for (const code of normalized) {
-			if (!isValidLanguageCode(code)) {
-				return yield* new InvalidLanguage({
-					message: `Unsupported language code: ${code}`,
-				});
-			}
-		}
-		return normalized;
-	},
-);
+	}
+	return normalized;
+}
 
-export const validateAudienceLanguagesExtra = Effect.fn(
-	"Languages.validateAudienceExtra",
-)(function* (spokenLanguages: string[], extra: string[] | undefined) {
+export function validateAudienceLanguagesExtra(
+	spokenLanguages: string[],
+	extra: string[] | undefined,
+) {
 	const normalizedExtra = normalizeLanguageList(extra ?? []);
 	for (const code of normalizedExtra) {
 		if (!isValidLanguageCode(code)) {
-			return yield* new InvalidLanguage({
+			throw new InvalidLanguage({
 				message: `Unsupported language code: ${code}`,
 			});
 		}
 	}
 	const audience = computeAudienceLanguages(spokenLanguages, normalizedExtra);
 	if (audience.length < 1) {
-		return yield* new InvalidLanguage({
+		throw new InvalidLanguage({
 			message: "Add at least one audience language",
 		});
 	}
 	return normalizedExtra;
-});
+}

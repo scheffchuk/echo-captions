@@ -1,4 +1,3 @@
-import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	canonicalizeTranslationMappings,
@@ -11,14 +10,12 @@ const audienceLanguages = ["en", "ja", "de"];
 function canonicalize(
 	mappings: Parameters<typeof canonicalizeTranslationMappings>[0],
 ) {
-	return Effect.runPromise(
-		canonicalizeTranslationMappings(mappings, audienceLanguages),
-	);
+	return canonicalizeTranslationMappings(mappings, audienceLanguages);
 }
 
 describe("translation mappings", () => {
 	it("canonicalizes NFC, outer whitespace, language codes, and row order", async () => {
-		await expect(
+		expect(
 			canonicalize([
 				{
 					term: "  cafe\u0301 ",
@@ -27,40 +24,40 @@ describe("translation mappings", () => {
 				},
 				{ term: "Echo", targetLanguage: "en", translation: " Écho " },
 			]),
-		).resolves.toEqual([
+		).toEqual([
 			{ term: "Echo", targetLanguage: "en", translation: "Écho" },
 			{ term: "café", targetLanguage: "ja", translation: "カフェ" },
 		]);
 	});
 
 	it("treats blank rows as no mappings and rejects partially filled rows", async () => {
-		await expect(
+		expect(
 			canonicalize([{ term: "", targetLanguage: "", translation: "" }]),
-		).resolves.toEqual([]);
-		await expect(
+		).toEqual([]);
+		expect(() =>
 			canonicalize([
 				{ term: "Echo", targetLanguage: "", translation: "エコー" },
 			]),
-		).rejects.toBeInstanceOf(MappingValidationError);
+		).toThrow(MappingValidationError);
 	});
 
 	it("rejects duplicate case-insensitive term and target pairs", async () => {
-		await expect(
+		expect(() =>
 			canonicalize([
 				{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 				{ term: "echo", targetLanguage: "JA", translation: "反響" },
 			]),
-		).rejects.toBeInstanceOf(MappingValidationError);
+		).toThrow(MappingValidationError);
 	});
 
 	it("counts Unicode characters and enforces the 100/200 limits", async () => {
-		await expect(
+		expect(() =>
 			canonicalize([
 				{ term: "😀".repeat(201), targetLanguage: "ja", translation: "x" },
 			]),
-		).rejects.toBeInstanceOf(MappingValidationError);
+		).toThrow(MappingValidationError);
 
-		await expect(
+		expect(() =>
 			canonicalize(
 				Array.from({ length: 101 }, (_, index) => ({
 					term: `term-${index}`,
@@ -68,11 +65,11 @@ describe("translation mappings", () => {
 					translation: "x",
 				})),
 			),
-		).rejects.toBeInstanceOf(MappingValidationError);
+		).toThrow(MappingValidationError);
 	});
 
 	it("matches case-insensitively without matching inside letter-number tokens", async () => {
-		const mappings = await canonicalize([
+		const mappings = canonicalize([
 			{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 		]);
 		const [document] = makeTranslationDocuments("echo ECHO Echoes", mappings, [
@@ -96,7 +93,7 @@ describe("translation mappings", () => {
 	});
 
 	it("handles case folds that expand to multiple Unicode code points", async () => {
-		const mappings = await canonicalize([
+		const mappings = canonicalize([
 			{ term: "İ", targetLanguage: "ja", translation: "イ" },
 		]);
 		const [document] = makeTranslationDocuments("i\u0307", mappings, ["ja"]);
@@ -105,7 +102,7 @@ describe("translation mappings", () => {
 			"i\u0307",
 		]);
 
-		const reverseMappings = await canonicalize([
+		const reverseMappings = canonicalize([
 			{ term: "i\u0307", targetLanguage: "ja", translation: "イ" },
 		]);
 		const [reverseDocument] = makeTranslationDocuments("İ", reverseMappings, [
@@ -117,7 +114,7 @@ describe("translation mappings", () => {
 	});
 
 	it("uses literal matching for scripts without word separators", async () => {
-		const mappings = await canonicalize([
+		const mappings = canonicalize([
 			{ term: "日本", targetLanguage: "en", translation: "Japan" },
 		]);
 		const [document] = makeTranslationDocuments("日本語と日本", mappings, [
@@ -131,7 +128,7 @@ describe("translation mappings", () => {
 	});
 
 	it("assigns overlap ownership to the longest valid term", async () => {
-		const mappings = await canonicalize([
+		const mappings = canonicalize([
 			{ term: "New York", targetLanguage: "ja", translation: "ニューヨーク" },
 			{ term: "York", targetLanguage: "ja", translation: "ヨーク" },
 		]);
@@ -148,7 +145,7 @@ describe("translation mappings", () => {
 	});
 
 	it("keeps mappings target-specific and uses plain text for no-match targets", async () => {
-		const mappings = await canonicalize([
+		const mappings = canonicalize([
 			{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 		]);
 		const documents = makeTranslationDocuments("Echo", mappings, ["ja", "de"]);

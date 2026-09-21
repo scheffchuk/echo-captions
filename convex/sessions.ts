@@ -1,5 +1,4 @@
-import { v } from "convex/values";
-import { Effect } from "effect";
+import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -10,12 +9,12 @@ import {
 	type QueryCtx,
 	query,
 } from "./_generated/server";
-import { exhaustPublicErrors, fromConvex } from "./effect/convex";
-import { runConvex } from "./effect/run";
-import { authErrorCodes, getCurrentOperatorId, getOperator } from "./lib/auth";
 import {
-	getBroadcastProjection,
-	getUnresolvedBroadcast,
+	authErrorCodes,
+	getCurrentOperatorId,
+	requireCurrentOperatorId,
+} from "./lib/auth";
+import {
 	type projectBroadcast,
 	readBroadcastProjection,
 } from "./lib/broadcasts";
@@ -27,13 +26,12 @@ import {
 	validateSpokenLanguages,
 } from "./lib/languages";
 import {
-	getOwnedSession,
+	getOwnedSessionNative,
 	InvalidSessionTransition,
-	nowMillis,
 	SessionBusy,
 	SessionDeleting,
 	sessionErrorCodes,
-	uniqueSessionSlug,
+	uniqueSessionSlugNative,
 } from "./lib/sessions";
 import {
 	canonicalizeTranslationMappings,
@@ -108,62 +106,77 @@ type EventFields = {
 	translationMappings?: TranslationMapping[];
 };
 
-const getCurrentMappingRevision = Effect.fn(
-	"Sessions.getCurrentMappingRevision",
-)(function* (ctx: MutationCtx, session: Doc<"sessions">) {
+type TaggedPublicError = {
+	readonly _tag: string;
+	readonly message: string;
+};
+
+function isTaggedPublicError(error: unknown): error is TaggedPublicError {
+	if (typeof error !== "object" || error === null) return false;
+	const candidate = error as { _tag?: unknown; message?: unknown };
+	return (
+		typeof candidate._tag === "string" && typeof candidate.message === "string"
+	);
+}
+
+async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
+	try {
+		return await operation();
+	} catch (error) {
+		if (isTaggedPublicError(error)) {
+			const code =
+				publicErrorCodes[error._tag as keyof typeof publicErrorCodes];
+			if (code !== undefined) {
+				throw new ConvexError({ code, message: error.message });
+			}
+		}
+		throw error;
+	}
+}
+
+async function getCurrentMappingRevision(
+	ctx: MutationCtx,
+	session: Doc<"sessions">,
+) {
 	if (session.translationMappingRevisionId === undefined) return null;
-	const revision = yield* fromConvex(
-		() =>
-			ctx.db.get(
-				"translationMappingRevisions",
-				session.translationMappingRevisionId as Id<"translationMappingRevisions">,
-			),
-		"Sessions.getCurrentMappingRevision",
+	const revision = await ctx.db.get(
+		"translationMappingRevisions",
+		session.translationMappingRevisionId as Id<"translationMappingRevisions">,
 	);
 	if (!revision || revision.sessionId !== session._id) {
-		return yield* new MappingValidationError({
+		throw new MappingValidationError({
 			message: "The Session mapping revision is unavailable",
 		});
 	}
 	return revision;
-});
+}
 
-const nextMappingRevision = Effect.fn("Sessions.nextMappingRevision")(
-	function* (
-		ctx: MutationCtx,
-		sessionId: Id<"sessions">,
-		mappings: TranslationMapping[],
-	) {
-		const latest = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("translationMappingRevisions")
-					.withIndex("by_session_id_and_revision", (q) =>
-						q.eq("sessionId", sessionId),
-					)
-					.order("desc")
-					.first(),
-			"Sessions.nextMappingRevision.latest",
-		);
-		return yield* fromConvex(
-			() =>
-				ctx.db.insert("translationMappingRevisions", {
-					sessionId,
-					revision: (latest?.revision ?? 0) + 1,
-					mappings,
-				}),
-			"Sessions.nextMappingRevision.insert",
-		);
-	},
-);
+async function nextMappingRevision(
+	ctx: MutationCtx,
+	sessionId: Id<"sessions">,
+	mappings: TranslationMapping[],
+) {
+	const latest = await ctx.db
+		.query("translationMappingRevisions")
+		.withIndex("by_session_id_and_revision", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.order("desc")
+		.first();
+	return await ctx.db.insert("translationMappingRevisions", {
+		sessionId,
+		revision: (latest?.revision ?? 0) + 1,
+		mappings,
+	});
+}
 
-const createSession = Effect.fn("Sessions.create")(function* (
+async function createSession(
 	ctx: MutationCtx,
 	args: { title: string } & EventFields,
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const spokenLanguages = yield* validateSpokenLanguages(args.spokenLanguages);
-	const audienceLanguagesExtra = yield* validateAudienceLanguagesExtra(
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const spokenLanguages = validateSpokenLanguages(args.spokenLanguages);
+	const audienceLanguagesExtra = validateAudienceLanguagesExtra(
 		spokenLanguages,
 		args.audienceLanguagesExtra,
 	);
@@ -171,12 +184,12 @@ const createSession = Effect.fn("Sessions.create")(function* (
 		spokenLanguages,
 		audienceLanguagesExtra,
 	);
-	const mappings = yield* canonicalizeTranslationMappings(
+	const mappings = canonicalizeTranslationMappings(
 		args.translationMappings ?? [],
 		audienceLanguages,
 	);
-	const slug = yield* uniqueSessionSlug(ctx);
-	const reservedAt = yield* nowMillis();
+	const slug = await uniqueSessionSlugNative(ctx);
+	const reservedAt = Date.now();
 
 	const {
 		title,
@@ -186,54 +199,31 @@ const createSession = Effect.fn("Sessions.create")(function* (
 		...rest
 	} = args;
 
-	yield* fromConvex(
-		() => ctx.db.insert("sessionSlugs", { slug, reservedAt }),
-		"Sessions.create.reserveSlug",
-	);
-	const sessionId = yield* fromConvex(
-		() =>
-			ctx.db.insert("sessions", {
-				title: title.trim() || "Untitled",
-				slug,
-				ownerId,
-				spokenLanguages,
-				audienceLanguages,
-				lastCommitSequence: 0,
-				lastBroadcastSequence: 0,
-				...rest,
-			}),
-		"Sessions.create.insert",
-	);
+	await ctx.db.insert("sessionSlugs", { slug, reservedAt });
+	const sessionId = await ctx.db.insert("sessions", {
+		title: title.trim() || "Untitled",
+		slug,
+		ownerId,
+		spokenLanguages,
+		audienceLanguages,
+		lastCommitSequence: 0,
+		lastBroadcastSequence: 0,
+		...rest,
+	});
 	if (mappings.length > 0) {
-		const revisionId = yield* nextMappingRevision(ctx, sessionId, mappings);
-		yield* fromConvex(
-			() =>
-				ctx.db.patch(sessionId, { translationMappingRevisionId: revisionId }),
-			"Sessions.create.setMappingRevision",
-		);
+		const revisionId = await nextMappingRevision(ctx, sessionId, mappings);
+		await ctx.db.patch(sessionId, { translationMappingRevisionId: revisionId });
 	}
 
 	return { slug };
-});
+}
 
-const getPublicBySlug = Effect.fn("Sessions.getBySlug")(function* (
-	ctx: QueryCtx,
-	slug: string,
-) {
-	const session = yield* fromConvex(
-		() =>
-			ctx.db
-				.query("sessions")
-				.withIndex("by_slug", (q) => q.eq("slug", slug))
-				.unique(),
-		"Sessions.getBySlug",
-	);
+async function getPublicBySlug(ctx: QueryCtx, slug: string) {
+	const session = await ctx.db
+		.query("sessions")
+		.withIndex("by_slug", (q) => q.eq("slug", slug))
+		.unique();
 	if (!session || session.deletionRequestedAt !== undefined) return null;
-	const broadcastProjection = yield* getBroadcastProjection(
-		ctx,
-		session._id,
-		"public",
-	);
 	return {
 		_id: session._id,
 		title: session.title,
@@ -241,25 +231,9 @@ const getPublicBySlug = Effect.fn("Sessions.getBySlug")(function* (
 		audienceLanguages: normalizeLanguageList(session.audienceLanguages),
 		description: session.description,
 		eventDate: session.eventDate,
-		...broadcastProjection,
+		...(await readBroadcastProjection(ctx, session._id, "public")),
 	};
-});
-
-const addLiveState = Effect.fn("Sessions.addLiveState")(function* (
-	ctx: QueryCtx,
-	session: Doc<"sessions">,
-) {
-	const translationMappings = yield* fromConvex(
-		() => readSessionTranslationMappings(ctx, session),
-		"Sessions.addLiveState.mappingRevision",
-	);
-	const broadcastProjection = yield* getBroadcastProjection(
-		ctx,
-		session._id,
-		"owner",
-	);
-	return toSessionView(session, translationMappings, broadcastProjection);
-});
+}
 
 async function readSessionTranslationMappings(
 	ctx: QueryCtx,
@@ -288,42 +262,31 @@ function toSessionView(
 	};
 }
 
-async function getOwnedSessionView(ctx: QueryCtx, session: Doc<"sessions">) {
-	const translationMappings = await readSessionTranslationMappings(
-		ctx,
+async function getSessionView(ctx: QueryCtx, session: Doc<"sessions">) {
+	return toSessionView(
 		session,
+		await readSessionTranslationMappings(ctx, session),
+		await readBroadcastProjection(ctx, session._id, "owner"),
 	);
-	const broadcastProjection = await readBroadcastProjection(
-		ctx,
-		session._id,
-		"owner",
-	);
-	return toSessionView(session, translationMappings, broadcastProjection);
 }
 
-const patchDescription = Effect.fn("Sessions.updateDescription")(function* (
+async function patchDescription(
 	ctx: MutationCtx,
 	sessionId: Id<"sessions">,
 	description: string,
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, sessionId, ownerId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(sessionId, {
-				description: description.trim() || undefined,
-			}),
-		"Sessions.updateDescription",
-	);
+	await ctx.db.patch(sessionId, {
+		description: description.trim() || undefined,
+	});
 	return null;
-});
+}
 
-const patchTranslationMappings = Effect.fn(
-	"Sessions.updateTranslationMappings",
-)(function* (
+async function patchTranslationMappings(
 	ctx: MutationCtx,
 	args: {
 		sessionId: Id<"sessions">;
@@ -331,20 +294,20 @@ const patchTranslationMappings = Effect.fn(
 		expectedRevisionId: Id<"translationMappingRevisions"> | null;
 	},
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, args.sessionId, ownerId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, args.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
 	const audienceLanguages = normalizeLanguageList(session.audienceLanguages);
-	const mappings = yield* canonicalizeTranslationMappings(
+	const mappings = canonicalizeTranslationMappings(
 		args.translationMappings,
 		audienceLanguages,
 	);
-	const currentRevision = yield* getCurrentMappingRevision(ctx, session);
+	const currentRevision = await getCurrentMappingRevision(ctx, session);
 	const currentRevisionId = session.translationMappingRevisionId ?? null;
 	if (args.expectedRevisionId !== currentRevisionId) {
-		return yield* new MappingRevisionConflict({
+		throw new MappingRevisionConflict({
 			message: "Glossary changed elsewhere. Reload it before saving.",
 		});
 	}
@@ -358,28 +321,20 @@ const patchTranslationMappings = Effect.fn(
 		return { revisionId: null, changed: false };
 	}
 	if (mappings.length === 0) {
-		yield* fromConvex(
-			() =>
-				ctx.db.patch(args.sessionId, {
-					translationMappingRevisionId: undefined,
-				}),
-			"Sessions.updateTranslationMappings.clear",
-		);
+		await ctx.db.patch(args.sessionId, {
+			translationMappingRevisionId: undefined,
+		});
 		return { revisionId: null, changed: true };
 	}
 
-	const revisionId = yield* nextMappingRevision(ctx, args.sessionId, mappings);
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(args.sessionId, {
-				translationMappingRevisionId: revisionId,
-			}),
-		"Sessions.updateTranslationMappings.setRevision",
-	);
+	const revisionId = await nextMappingRevision(ctx, args.sessionId, mappings);
+	await ctx.db.patch(args.sessionId, {
+		translationMappingRevisionId: revisionId,
+	});
 	return { revisionId, changed: true };
-});
+}
 
-const patchLanguages = Effect.fn("Sessions.updateLanguages")(function* (
+async function patchLanguages(
 	ctx: MutationCtx,
 	args: {
 		sessionId: Id<"sessions">;
@@ -387,13 +342,13 @@ const patchLanguages = Effect.fn("Sessions.updateLanguages")(function* (
 		audienceLanguagesExtra?: string[];
 	},
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, args.sessionId, ownerId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, args.sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
-	const spokenLanguages = yield* validateSpokenLanguages(args.spokenLanguages);
-	const audienceLanguagesExtra = yield* validateAudienceLanguagesExtra(
+	const spokenLanguages = validateSpokenLanguages(args.spokenLanguages);
+	const audienceLanguagesExtra = validateAudienceLanguagesExtra(
 		spokenLanguages,
 		args.audienceLanguagesExtra,
 	);
@@ -401,8 +356,8 @@ const patchLanguages = Effect.fn("Sessions.updateLanguages")(function* (
 		spokenLanguages,
 		audienceLanguagesExtra,
 	);
-	const currentRevision = yield* getCurrentMappingRevision(ctx, session);
-	const mappings = yield* canonicalizeTranslationMappings(
+	const currentRevision = await getCurrentMappingRevision(ctx, session);
+	const mappings = canonicalizeTranslationMappings(
 		filterMappingsForAudience(
 			currentRevision?.mappings ?? [],
 			audienceLanguages,
@@ -416,275 +371,174 @@ const patchLanguages = Effect.fn("Sessions.updateLanguages")(function* (
 	) {
 		translationMappingRevisionId =
 			mappings.length > 0
-				? yield* nextMappingRevision(ctx, args.sessionId, mappings)
+				? await nextMappingRevision(ctx, args.sessionId, mappings)
 				: undefined;
 	}
 
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(args.sessionId, {
-				spokenLanguages,
-				audienceLanguages,
-				translationMappingRevisionId,
-			}),
-		"Sessions.updateLanguages",
-	);
+	await ctx.db.patch(args.sessionId, {
+		spokenLanguages,
+		audienceLanguages,
+		translationMappingRevisionId,
+	});
 	return null;
-});
+}
 
-const patchTitle = Effect.fn("Sessions.updateTitle")(function* (
+async function patchTitle(
 	ctx: MutationCtx,
 	sessionId: Id<"sessions">,
 	title: string,
 ) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, sessionId, ownerId);
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) {
-		return yield* new SessionDeleting({ message: "Session is being deleted" });
+		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
-	yield* fromConvex(
-		() =>
-			ctx.db.patch(sessionId, {
-				title: title.trim() || "Untitled",
-			}),
-		"Sessions.updateTitle",
-	);
+	await ctx.db.patch(sessionId, {
+		title: title.trim() || "Untitled",
+	});
 	return null;
-});
+}
 
-const removeSession = Effect.fn("Sessions.delete")(function* (
-	ctx: MutationCtx,
-	sessionId: Id<"sessions">,
-) {
-	const ownerId = yield* getOperator(ctx);
-	const session = yield* getOwnedSession(ctx, sessionId, ownerId);
+async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
+	const ownerId = await requireCurrentOperatorId(ctx);
+	const session = await getOwnedSessionNative(ctx, sessionId, ownerId);
 	if (session.deletionRequestedAt !== undefined) return null;
 
-	const unresolvedBroadcast = yield* getUnresolvedBroadcast(ctx, sessionId);
-	if (unresolvedBroadcast) {
-		return yield* new InvalidSessionTransition({
+	const broadcastProjection = await readBroadcastProjection(
+		ctx,
+		sessionId,
+		"owner",
+	);
+	if (broadcastProjection.activeBroadcast) {
+		throw new InvalidSessionTransition({
 			message:
 				"Resolve the active or Lost Broadcast before deleting the Session",
 		});
 	}
 
-	const pendingAcceptedCommit = yield* fromConvex(
-		() =>
-			ctx.db
-				.query("acceptedCommits")
-				.withIndex("by_session_id_and_status", (q) =>
-					q.eq("sessionId", sessionId).eq("status", "pending"),
-				)
-				.first(),
-		"Sessions.delete.findPendingAcceptedCommit",
-	);
+	const pendingAcceptedCommit = await ctx.db
+		.query("acceptedCommits")
+		.withIndex("by_session_id_and_status", (q) =>
+			q.eq("sessionId", sessionId).eq("status", "pending"),
+		)
+		.first();
 	if (pendingAcceptedCommit) {
-		return yield* new SessionBusy({
+		throw new SessionBusy({
 			message: "Wait for active translations to finish before deleting",
 		});
 	}
 
-	const slugReservation = yield* fromConvex(
-		() =>
-			ctx.db
-				.query("sessionSlugs")
-				.withIndex("by_slug", (q) => q.eq("slug", session.slug))
-				.unique(),
-		"Sessions.delete.findSlugReservation",
-	);
+	const slugReservation = await ctx.db
+		.query("sessionSlugs")
+		.withIndex("by_slug", (q) => q.eq("slug", session.slug))
+		.unique();
 	if (!slugReservation) {
-		const reservedAt = yield* nowMillis();
-		yield* fromConvex(
-			() =>
-				ctx.db.insert("sessionSlugs", {
-					slug: session.slug,
-					reservedAt,
-				}),
-			"Sessions.delete.reserveSlug",
-		);
+		await ctx.db.insert("sessionSlugs", {
+			slug: session.slug,
+			reservedAt: Date.now(),
+		});
 	}
 
-	const deletionRequestedAt = yield* nowMillis();
-	yield* fromConvex(
-		() => ctx.db.patch(sessionId, { deletionRequestedAt }),
-		"Sessions.delete.markRequested",
-	);
-	yield* fromConvex(
-		() =>
-			ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, { sessionId }),
-		"Sessions.delete.scheduleBatch",
-	);
+	await ctx.db.patch(sessionId, { deletionRequestedAt: Date.now() });
+	await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, { sessionId });
 	return null;
-});
+}
 
-const deleteSessionBatch: (
-	ctx: MutationCtx,
-	sessionId: Id<"sessions">,
-) => Effect.Effect<null, unknown> = Effect.fn("Sessions.deleteBatch")(
-	function* (ctx: MutationCtx, sessionId: Id<"sessions">) {
-		const session = yield* fromConvex(
-			() => ctx.db.get("sessions", sessionId),
-			"Sessions.deleteBatch.getSession",
-		);
-		if (!session || session.deletionRequestedAt === undefined) return null;
+async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
+	const session = await ctx.db.get("sessions", sessionId);
+	if (!session || session.deletionRequestedAt === undefined) return null;
 
-		const segments = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("segments")
-					.withIndex("by_session_id_and_sequence", (q) =>
-						q.eq("sessionId", sessionId),
-					)
-					.take(SEGMENT_DELETE_BATCH_SIZE + 1),
-			"Sessions.deleteBatch.listSegments",
-		);
-		const batch = segments.slice(0, SEGMENT_DELETE_BATCH_SIZE);
-		yield* Effect.forEach(batch, (segment) =>
-			fromConvex(
-				() => ctx.db.delete("segments", segment._id),
-				"Sessions.deleteBatch.deleteSegment",
-			),
-		);
+	const segments = await ctx.db
+		.query("segments")
+		.withIndex("by_session_id_and_sequence", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.take(SEGMENT_DELETE_BATCH_SIZE + 1);
+	for (const segment of segments.slice(0, SEGMENT_DELETE_BATCH_SIZE)) {
+		await ctx.db.delete("segments", segment._id);
+	}
 
-		if (segments.length > SEGMENT_DELETE_BATCH_SIZE) {
-			yield* fromConvex(
-				() =>
-					ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
-						sessionId,
-					}),
-				"Sessions.deleteBatch.scheduleNext",
-			);
-			return null;
-		}
-
-		const acceptedCommitTargets = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("acceptedCommitTargets")
-					.withIndex("by_session_id", (q) => q.eq("sessionId", sessionId))
-					.take(ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE + 1),
-			"Sessions.deleteBatch.listAcceptedCommitTargets",
-		);
-		const acceptedCommitTargetBatch = acceptedCommitTargets.slice(
-			0,
-			ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE,
-		);
-		yield* Effect.forEach(acceptedCommitTargetBatch, (target) =>
-			fromConvex(
-				() => ctx.db.delete("acceptedCommitTargets", target._id),
-				"Sessions.deleteBatch.deleteAcceptedCommitTarget",
-			),
-		);
-		if (
-			acceptedCommitTargets.length > ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE
-		) {
-			yield* fromConvex(
-				() =>
-					ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
-						sessionId,
-					}),
-				"Sessions.deleteBatch.scheduleAcceptedCommitTargets",
-			);
-			return null;
-		}
-
-		const acceptedCommits = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("acceptedCommits")
-					.withIndex("by_session_id_and_sequence", (q) =>
-						q.eq("sessionId", sessionId),
-					)
-					.take(ACCEPTED_COMMIT_DELETE_BATCH_SIZE + 1),
-			"Sessions.deleteBatch.listAcceptedCommits",
-		);
-		const acceptedCommitBatch = acceptedCommits.slice(
-			0,
-			ACCEPTED_COMMIT_DELETE_BATCH_SIZE,
-		);
-		yield* Effect.forEach(acceptedCommitBatch, (commit) =>
-			fromConvex(
-				() => ctx.db.delete("acceptedCommits", commit._id),
-				"Sessions.deleteBatch.deleteAcceptedCommit",
-			),
-		);
-		if (acceptedCommits.length > ACCEPTED_COMMIT_DELETE_BATCH_SIZE) {
-			yield* fromConvex(
-				() =>
-					ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
-						sessionId,
-					}),
-				"Sessions.deleteBatch.scheduleAcceptedCommits",
-			);
-			return null;
-		}
-
-		const broadcasts = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("broadcasts")
-					.withIndex("by_session_id_and_sequence", (q) =>
-						q.eq("sessionId", sessionId),
-					)
-					.take(BROADCAST_DELETE_BATCH_SIZE + 1),
-			"Sessions.deleteBatch.listBroadcasts",
-		);
-		const broadcastBatch = broadcasts.slice(0, BROADCAST_DELETE_BATCH_SIZE);
-		yield* Effect.forEach(broadcastBatch, (broadcast) =>
-			fromConvex(
-				() => ctx.db.delete("broadcasts", broadcast._id),
-				"Sessions.deleteBatch.deleteBroadcast",
-			),
-		);
-		if (broadcasts.length > BROADCAST_DELETE_BATCH_SIZE) {
-			yield* fromConvex(
-				() =>
-					ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
-						sessionId,
-					}),
-				"Sessions.deleteBatch.scheduleBroadcasts",
-			);
-			return null;
-		}
-
-		const mappingRevisions = yield* fromConvex(
-			() =>
-				ctx.db
-					.query("translationMappingRevisions")
-					.withIndex("by_session_id_and_revision", (q) =>
-						q.eq("sessionId", sessionId),
-					)
-					.take(MAPPING_REVISION_DELETE_BATCH_SIZE + 1),
-			"Sessions.deleteBatch.listMappingRevisions",
-		);
-		const mappingRevisionBatch = mappingRevisions.slice(
-			0,
-			MAPPING_REVISION_DELETE_BATCH_SIZE,
-		);
-		yield* Effect.forEach(mappingRevisionBatch, (revision) =>
-			fromConvex(
-				() => ctx.db.delete("translationMappingRevisions", revision._id),
-				"Sessions.deleteBatch.deleteMappingRevision",
-			),
-		);
-		if (mappingRevisions.length > MAPPING_REVISION_DELETE_BATCH_SIZE) {
-			yield* fromConvex(
-				() =>
-					ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
-						sessionId,
-					}),
-				"Sessions.deleteBatch.scheduleMappingRevisions",
-			);
-			return null;
-		}
-
-		yield* fromConvex(
-			() => ctx.db.delete("sessions", sessionId),
-			"Sessions.deleteBatch.deleteSession",
-		);
+	if (segments.length > SEGMENT_DELETE_BATCH_SIZE) {
+		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
+			sessionId,
+		});
 		return null;
-	},
-);
+	}
+
+	const acceptedCommitTargets = await ctx.db
+		.query("acceptedCommitTargets")
+		.withIndex("by_session_id", (q) => q.eq("sessionId", sessionId))
+		.take(ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE + 1);
+	for (const target of acceptedCommitTargets.slice(
+		0,
+		ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE,
+	)) {
+		await ctx.db.delete("acceptedCommitTargets", target._id);
+	}
+	if (acceptedCommitTargets.length > ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE) {
+		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
+			sessionId,
+		});
+		return null;
+	}
+
+	const acceptedCommits = await ctx.db
+		.query("acceptedCommits")
+		.withIndex("by_session_id_and_sequence", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.take(ACCEPTED_COMMIT_DELETE_BATCH_SIZE + 1);
+	for (const commit of acceptedCommits.slice(
+		0,
+		ACCEPTED_COMMIT_DELETE_BATCH_SIZE,
+	)) {
+		await ctx.db.delete("acceptedCommits", commit._id);
+	}
+	if (acceptedCommits.length > ACCEPTED_COMMIT_DELETE_BATCH_SIZE) {
+		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
+			sessionId,
+		});
+		return null;
+	}
+
+	const broadcasts = await ctx.db
+		.query("broadcasts")
+		.withIndex("by_session_id_and_sequence", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.take(BROADCAST_DELETE_BATCH_SIZE + 1);
+	for (const broadcast of broadcasts.slice(0, BROADCAST_DELETE_BATCH_SIZE)) {
+		await ctx.db.delete("broadcasts", broadcast._id);
+	}
+	if (broadcasts.length > BROADCAST_DELETE_BATCH_SIZE) {
+		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
+			sessionId,
+		});
+		return null;
+	}
+
+	const mappingRevisions = await ctx.db
+		.query("translationMappingRevisions")
+		.withIndex("by_session_id_and_revision", (q) =>
+			q.eq("sessionId", sessionId),
+		)
+		.take(MAPPING_REVISION_DELETE_BATCH_SIZE + 1);
+	for (const revision of mappingRevisions.slice(
+		0,
+		MAPPING_REVISION_DELETE_BATCH_SIZE,
+	)) {
+		await ctx.db.delete("translationMappingRevisions", revision._id);
+	}
+	if (mappingRevisions.length > MAPPING_REVISION_DELETE_BATCH_SIZE) {
+		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
+			sessionId,
+		});
+		return null;
+	}
+
+	await ctx.db.delete("sessions", sessionId);
+	return null;
+}
 
 export const create = mutation({
 	args: {
@@ -692,10 +546,7 @@ export const create = mutation({
 		...eventFields,
 	},
 	returns: v.object({ slug: v.string() }),
-	handler: (ctx, args) =>
-		runConvex(
-			createSession(ctx, args).pipe(exhaustPublicErrors(publicErrorCodes)),
-		),
+	handler: async (ctx, args) => atPublicEdge(() => createSession(ctx, args)),
 });
 
 export const listMine = query({
@@ -713,9 +564,7 @@ export const listMine = query({
 			.order("desc")
 			.collect();
 		return await Promise.all(
-			sessions.map((session) =>
-				runConvex(addLiveState(ctx, session).pipe(Effect.orDie)),
-			),
+			sessions.map((session) => getSessionView(ctx, session)),
 		);
 	},
 });
@@ -723,8 +572,7 @@ export const listMine = query({
 export const getBySlug = query({
 	args: { slug: v.string() },
 	returns: v.union(publicSessionValidator, v.null()),
-	handler: (ctx, args) =>
-		runConvex(getPublicBySlug(ctx, args.slug).pipe(Effect.orDie)),
+	handler: async (ctx, args) => getPublicBySlug(ctx, args.slug),
 });
 
 export const getMineBySlug = query({
@@ -740,7 +588,7 @@ export const getMineBySlug = query({
 			.withIndex("by_slug", (q) => q.eq("slug", args.slug))
 			.unique();
 		if (!session || session.ownerId !== ownerId) return null;
-		return await getOwnedSessionView(ctx, session);
+		return await getSessionView(ctx, session);
 	},
 });
 
@@ -750,24 +598,14 @@ export const updateDescription = mutation({
 		description: v.string(),
 	},
 	returns: v.null(),
-	handler: (ctx, args) =>
-		runConvex(
-			patchDescription(ctx, args.sessionId, args.description).pipe(
-				exhaustPublicErrors(publicErrorCodes),
-			),
-		),
+	handler: async (ctx, args) =>
+		atPublicEdge(() => patchDescription(ctx, args.sessionId, args.description)),
 });
 
 export const getForAction = internalQuery({
 	args: { sessionId: v.id("sessions") },
 	returns: v.union(storedSessionValidator, v.null()),
-	handler: (ctx, args) =>
-		runConvex(
-			fromConvex(
-				() => ctx.db.get("sessions", args.sessionId),
-				"Sessions.getForAction",
-			).pipe(Effect.orDie),
-		),
+	handler: async (ctx, args) => ctx.db.get("sessions", args.sessionId),
 });
 
 export const updateTranslationMappings = mutation({
@@ -780,12 +618,8 @@ export const updateTranslationMappings = mutation({
 		revisionId: v.union(v.id("translationMappingRevisions"), v.null()),
 		changed: v.boolean(),
 	}),
-	handler: (ctx, args) =>
-		runConvex(
-			patchTranslationMappings(ctx, args).pipe(
-				exhaustPublicErrors(publicErrorCodes),
-			),
-		),
+	handler: async (ctx, args) =>
+		atPublicEdge(() => patchTranslationMappings(ctx, args)),
 });
 
 export const updateLanguages = mutation({
@@ -795,10 +629,7 @@ export const updateLanguages = mutation({
 		audienceLanguagesExtra: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
-	handler: (ctx, args) =>
-		runConvex(
-			patchLanguages(ctx, args).pipe(exhaustPublicErrors(publicErrorCodes)),
-		),
+	handler: async (ctx, args) => atPublicEdge(() => patchLanguages(ctx, args)),
 });
 
 export const updateTitle = mutation({
@@ -807,12 +638,8 @@ export const updateTitle = mutation({
 		title: v.string(),
 	},
 	returns: v.null(),
-	handler: (ctx, args) =>
-		runConvex(
-			patchTitle(ctx, args.sessionId, args.title).pipe(
-				exhaustPublicErrors(publicErrorCodes),
-			),
-		),
+	handler: async (ctx, args) =>
+		atPublicEdge(() => patchTitle(ctx, args.sessionId, args.title)),
 });
 
 export const deleteSession = mutation({
@@ -820,17 +647,12 @@ export const deleteSession = mutation({
 		sessionId: v.id("sessions"),
 	},
 	returns: v.null(),
-	handler: (ctx, args): Promise<null> =>
-		runConvex(
-			removeSession(ctx, args.sessionId).pipe(
-				exhaustPublicErrors(publicErrorCodes),
-			),
-		),
+	handler: async (ctx, args) =>
+		atPublicEdge(() => removeSession(ctx, args.sessionId)),
 });
 
 export const deleteBatch = internalMutation({
 	args: { sessionId: v.id("sessions") },
 	returns: v.null(),
-	handler: (ctx, args): Promise<null> =>
-		runConvex(deleteSessionBatch(ctx, args.sessionId).pipe(Effect.orDie)),
+	handler: async (ctx, args) => deleteSessionBatch(ctx, args.sessionId),
 });

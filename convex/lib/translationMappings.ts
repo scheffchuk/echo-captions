@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import { normalizeLanguageCode } from "../../shared/languages";
 import {
 	canonicalizeTranslationMappings as canonicalizeMappingPolicy,
@@ -55,26 +55,23 @@ function folded(value: string): string {
 	return value.toLowerCase();
 }
 
-function fail(message: string): Effect.Effect<never, MappingValidationError> {
-	return Effect.fail(new MappingValidationError({ message }));
-}
-
 /**
  * Return the canonical representation stored in a Mapping revision.
  * Blank rows are useful while editing in the browser and are discarded; a
  * partially filled row is rejected so it can never become an implicit rule.
  */
-export const canonicalizeTranslationMappings = Effect.fn(
-	"TranslationMappings.canonicalize",
-)(function* (
+export function canonicalizeTranslationMappings(
 	mappings: ReadonlyArray<TranslationMapping>,
 	audienceLanguages: ReadonlyArray<string>,
-) {
+): TranslationMapping[] {
 	const result = canonicalizeMappingPolicy(mappings, audienceLanguages);
-	if (!result.ok)
-		return yield* fail(result.issues.map((issue) => issue.message).join(" "));
+	if (!result.ok) {
+		throw new MappingValidationError({
+			message: result.issues.map((issue) => issue.message).join(" "),
+		});
+	}
 	return result.mappings;
-});
+}
 
 function isLetterOrNumber(value: string | undefined): boolean {
 	return value !== undefined && /^[\p{L}\p{N}]$/u.test(value);

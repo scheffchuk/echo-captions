@@ -58,6 +58,16 @@ export async function getCurrentOperatorId(
 	return user ? userId : null;
 }
 
+export async function requireCurrentOperatorId(
+	ctx: QueryCtx | MutationCtx,
+): Promise<Id<"users">> {
+	const operatorId = await getCurrentOperatorId(ctx);
+	if (operatorId === null) {
+		throw new NotAuthenticated({ message: "Not authenticated" });
+	}
+	return operatorId;
+}
+
 export const requireOperatorId = Effect.fn("Auth.requireOperatorId")(function* (
 	ctx: AuthCtx,
 ): Effect.fn.Return<Id<"users">, NotAuthenticated | PersistenceError> {
