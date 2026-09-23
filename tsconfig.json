@@ -18,5 +18,11 @@
 		}
 	},
 	"include": ["**/*.ts", "**/*.tsx"],
-	"exclude": ["node_modules", "temp", ".output", "dist"]
+	"exclude": [
+		"node_modules",
+		"temp",
+		".output",
+		"dist",
+		"tools/oxlint/anti-slop"
+	]
 }

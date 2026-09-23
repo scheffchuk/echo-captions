@@ -20,7 +20,8 @@
 			"!.output",
 			"!.nitro",
 			"!.tanstack",
-			"!dist"
+			"!dist",
+			"!tools/oxlint/anti-slop"
 		]
 	},
 	"formatter": {
