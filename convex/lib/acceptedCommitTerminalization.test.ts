@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { testId } from "@/test/ids";
+import { testId } from "../../test/ids";
 import {
 	classifyTargetCompletion,
 	MAX_PROVIDER_ATTEMPTS,

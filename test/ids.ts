@@ -1,4 +1,4 @@
-import type { Id, TableNames } from "@/convex/_generated/dataModel";
+import type { Id, TableNames } from "../convex/_generated/dataModel";
 
 export function testId<TableName extends TableNames>(
 	_table: TableName,

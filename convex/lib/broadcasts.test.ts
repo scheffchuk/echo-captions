@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { testId } from "@/test/ids";
+import { testId } from "../../test/ids";
 import {
 	BROADCAST_HEARTBEAT_TIMEOUT_MS,
 	type BroadcastLifecycleState,
