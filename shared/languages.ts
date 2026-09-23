@@ -48,7 +48,7 @@ export const SUPPORTED_LANGUAGE_CODES = COMMON_LANGUAGES.map(
 
 const SUPPORTED_SET = new Set<string>(SUPPORTED_LANGUAGE_CODES);
 
-const SCRIBE_TO_INTERNAL: Record<string, LanguageCode> = {
+const SCRIBE_TO_INTERNAL = {
 	eng: "en",
 	cmn: "zh",
 	zho: "zh",
@@ -91,9 +91,12 @@ const SCRIBE_TO_INTERNAL: Record<string, LanguageCode> = {
 
 export function normalizeLanguageCode(code: string): string {
 	const normalized = code.trim().toLowerCase();
+
 	if (normalized === "zh-cn" || normalized === "zh-tw") return "zh";
+
 	if (normalized === "zh-hans" || normalized === "zh-hant") return "zh";
 	const base = normalized.split("-")[0];
+
 	return base === "zh" ? "zh" : base;
 }
 
@@ -108,14 +111,19 @@ export function isValidLanguageCode(code: string): boolean {
 export function fromScribeCode(code: string | undefined): string | undefined {
 	if (!code) return undefined;
 	const normalized = normalizeLanguageCode(code);
+
 	if (isSupportedLanguageCode(normalized)) return normalized;
-	const mapped = SCRIBE_TO_INTERNAL[normalized];
-	return mapped;
+
+	return Object.entries(SCRIBE_TO_INTERNAL).find(
+		([scribeCode]) => scribeCode === normalized,
+	)?.[1];
 }
 
 export function toGoogleCode(code: string): string {
 	const normalized = normalizeLanguageCode(code);
+
 	if (normalized === "zh") return "zh-CN";
+
 	return normalized;
 }
 

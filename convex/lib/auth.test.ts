@@ -1,69 +1,70 @@
+/// <reference types="vite/client" />
 // @vitest-environment edge-runtime
 
+import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
-import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
-import { requireCurrentOperatorId } from "./auth";
+import schema from "../schema";
+import { NotAuthenticated, requireCurrentOperatorId } from "./auth";
 
-const operatorId = "users:operator" as Id<"users">;
-const sessionId = "authSessions:session";
+const modules = Object.fromEntries(
+	Object.entries(import.meta.glob("../**/*.ts")).map(([key, loader]) => [
+		key.replace(/^\.\.\//, "./"),
+		loader,
+	]),
+);
 
-function makeContext(args: {
-	identityUserId?: Id<"users">;
-	user?: Doc<"users"> | null;
-}): QueryCtx {
+function identityFor(userId: string) {
 	return {
-		auth: {
-			getUserIdentity: async () =>
-				args.identityUserId === undefined
-					? null
-					: {
-							issuer: "https://auth.example",
-							subject: `${args.identityUserId}|${sessionId}`,
-							tokenIdentifier: `https://auth.example|${args.identityUserId}|${sessionId}`,
-						},
-		},
-		db: {
-			get: async (_table: string, id: string) =>
-				id === args.identityUserId ? (args.user ?? null) : null,
-		},
-	} as unknown as QueryCtx;
-}
-
-function storedUser(userId: Id<"users">): Doc<"users"> {
-	return {
-		_id: userId,
-		_creationTime: 0,
-		email: "operator@echo.example",
-	} as Doc<"users">;
+		issuer: "https://auth.example",
+		subject: `${userId}|authSessions:session`,
+		tokenIdentifier: `https://auth.example|${userId}|authSessions:session`,
+	};
 }
 
 describe("requireCurrentOperatorId", () => {
 	it("denies an unauthenticated caller", async () => {
+		const t = convexTest(schema, modules);
+
 		await expect(
-			requireCurrentOperatorId(makeContext({})),
-		).rejects.toMatchObject({ _tag: "NotAuthenticated" });
+			t.run((ctx) => requireCurrentOperatorId(ctx)),
+		).rejects.toBeInstanceOf(NotAuthenticated);
 	});
 
 	it("denies a deleted account", async () => {
+		const t = convexTest(schema, modules);
+
+		const userId = await t.run(async (ctx) => {
+			const id = await ctx.db.insert("users", {
+				email: "gone@echo.example",
+				name: "Gone",
+			});
+
+			await ctx.db.delete(id);
+
+			return id;
+		});
+
 		await expect(
-			requireCurrentOperatorId(
-				makeContext({
-					identityUserId: operatorId,
-					user: null,
-				}),
-			),
-		).rejects.toMatchObject({ _tag: "NotAuthenticated" });
+			t
+				.withIdentity(identityFor(userId))
+				.run((ctx) => requireCurrentOperatorId(ctx)),
+		).rejects.toBeInstanceOf(NotAuthenticated);
 	});
 
 	it("returns the signed-in user id", async () => {
+		const t = convexTest(schema, modules);
+
+		const operatorId = await t.run(async (ctx) => {
+			return await ctx.db.insert("users", {
+				email: "operator@echo.example",
+				name: "Operator",
+			});
+		});
+
 		await expect(
-			requireCurrentOperatorId(
-				makeContext({
-					identityUserId: operatorId,
-					user: storedUser(operatorId),
-				}),
-			),
+			t
+				.withIdentity(identityFor(operatorId))
+				.run((ctx) => requireCurrentOperatorId(ctx)),
 		).resolves.toBe(operatorId);
 	});
 });

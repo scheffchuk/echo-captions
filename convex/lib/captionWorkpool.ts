@@ -17,6 +17,7 @@ export async function enqueueCaptionTargets(
 	runAfterMillis?: number,
 ) {
 	if (targetIds.length === 0) return;
+
 	const workIds = await captionWorkpool.enqueueActionBatch(
 		ctx,
 		internal.captions.translateTarget,
@@ -30,8 +31,10 @@ export async function enqueueCaptionTargets(
 				: { runAfter: runAfterMillis }),
 		},
 	);
+
 	for (const [index, targetId] of targetIds.entries()) {
 		const workId = workIds[index];
+
 		if (workId) {
 			await ctx.db.patch(targetId, { workId });
 		}

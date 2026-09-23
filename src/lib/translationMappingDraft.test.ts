@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { testId } from "@/test/ids";
 import {
 	addTranslationMappingDraftRow,
 	createTranslationMappingDraft,
@@ -20,6 +21,7 @@ const savedMappings = [
 
 function ids(...values: string[]) {
 	let index = 0;
+
 	return () => values[index++] ?? `generated-${index}`;
 }
 
@@ -33,16 +35,20 @@ describe("translation mapping draft", () => {
 	it("assigns opaque IDs once and keeps them through row edits", () => {
 		const draft = hydrateTranslationMappingDraft(
 			savedMappings,
-			"revision-1",
+			testId("translationMappingRevisions", "revision-1"),
 			ids("saved-1"),
 		);
+
 		const rowId = draft.rows[0]?.id;
+
 		if (!rowId) throw new Error("expected a hydrated row");
 
 		const added = addTranslationMappingDraftRow(draft, ids("new-1"));
+
 		const edited = updateTranslationMappingDraftRow(added, rowId, {
 			translation: "Echo Prime",
 		});
+
 		const removed = removeTranslationMappingDraftRow(edited, "new-1");
 
 		expect(removed.rows).toEqual([
@@ -78,6 +84,7 @@ describe("translation mapping draft", () => {
 				translation: "反響",
 			},
 		]);
+
 		const projection = projectTranslationMappingDraft(
 			authoredDraft,
 			audienceCodes,
@@ -119,6 +126,7 @@ describe("translation mapping draft", () => {
 				{ rowId: "duplicate", field: "term", code: "duplicate_mapping" },
 			]),
 		});
+
 		if (projection.ok) throw new Error("expected invalid mapping projection");
 		expect(projection.issues).not.toEqual(
 			expect.arrayContaining([
@@ -249,6 +257,7 @@ describe("translation mapping draft", () => {
 		);
 
 		expect(projection).toMatchObject({ ok: true });
+
 		if (!projection.ok) throw new Error("expected valid mappings");
 		expect(projection.mappings).toHaveLength(100);
 		expect(projection.mappings).not.toContainEqual(
@@ -261,6 +270,7 @@ describe("translation mapping draft", () => {
 			{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 			{ term: "Word", targetLanguage: "en", translation: "term" },
 		];
+
 		const draft = createTranslationMappingDraft({
 			rows: [
 				{ id: "word", ...baseMappings[1] },
@@ -272,7 +282,7 @@ describe("translation mapping draft", () => {
 				},
 			],
 			baseMappings,
-			baseRevisionId: "revision-1",
+			baseRevisionId: testId("translationMappingRevisions", "revision-1"),
 		});
 
 		expect(isTranslationMappingDraftDirty(draft, audienceCodes)).toBe(false);
@@ -303,36 +313,39 @@ describe("translation mapping draft", () => {
 	it("reconciles clean drafts and marks dirty drafts as conflicts without merging", () => {
 		const clean = hydrateTranslationMappingDraft(
 			savedMappings,
-			"revision-1",
+			testId("translationMappingRevisions", "revision-1"),
 			ids("saved-1"),
 		);
+
 		const latest = [{ term: "New", targetLanguage: "ja", translation: "新" }];
+
 		const rebased = reconcileTranslationMappingDraft(
 			clean,
 			latest,
-			"revision-2",
+			testId("translationMappingRevisions", "revision-2"),
 			ids("latest-1"),
 		);
 
 		expect(rebased).toMatchObject({
 			rows: [{ id: "latest-1", ...latest[0] }],
-			baseRevisionId: "revision-2",
+			baseRevisionId: testId("translationMappingRevisions", "revision-2"),
 			conflict: false,
 		});
 
 		const dirty = updateTranslationMappingDraftRow(clean, "saved-1", {
 			translation: "Local change",
 		});
+
 		const conflicted = reconcileTranslationMappingDraft(
 			dirty,
 			latest,
-			"revision-2",
+			testId("translationMappingRevisions", "revision-2"),
 			ids("unused"),
 		);
 
 		expect(conflicted).toMatchObject({
 			rows: [{ id: "saved-1", translation: "Local change" }],
-			baseRevisionId: "revision-1",
+			baseRevisionId: testId("translationMappingRevisions", "revision-1"),
 			conflict: true,
 		});
 		expect(markTranslationMappingDraftConflict(dirty).conflict).toBe(true);
@@ -341,13 +354,14 @@ describe("translation mapping draft", () => {
 	it("retains a mapping invalidated by an Audience language removal", () => {
 		const draft = hydrateTranslationMappingDraft(
 			savedMappings,
-			"revision-1",
+			testId("translationMappingRevisions", "revision-1"),
 			ids("saved-1"),
 		);
+
 		const reconciled = reconcileTranslationMappingDraft(
 			draft,
 			[],
-			"revision-2",
+			testId("translationMappingRevisions", "revision-2"),
 			ids("retained-1"),
 			["en"],
 		);

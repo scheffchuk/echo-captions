@@ -32,7 +32,7 @@ import {
 	computeTranslationTargets,
 	resolveSourceLanguage,
 } from "./lib/languages";
-import { makeTranslationDocuments } from "./lib/translationMappings";
+import { translationDocuments } from "./lib/translationMappings";
 import {
 	acceptedCommitStatusValidator,
 	acceptedCommitTargetPriorityValidator,
@@ -40,9 +40,13 @@ import {
 } from "./schema";
 
 const MAX_COMMIT_ID_CHARS = 128;
+
 const MAX_SOURCE_TEXT_CHARS = 8_000;
+
 const MAX_EXPLICIT_RETRY_DELAY_MS = 1_000;
+
 const RETRY_DISPATCH_BATCH_SIZE = 32;
+
 const RETRY_DISPATCHING_WORK_ID = "retry-dispatching";
 
 const acceptedCommitReceiptValidator = v.object({
@@ -117,6 +121,7 @@ const targetContextValidator = v.union(
 );
 
 type AcceptedCommit = Doc<"acceptedCommits">;
+
 type TargetContext = {
 	targetId: Id<"acceptedCommitTargets">;
 	acceptedCommitId: Id<"acceptedCommits">;
@@ -144,6 +149,7 @@ function validateCommitInput(args: {
 	commitOrdinal: number;
 }) {
 	const commitId = args.commitId.trim();
+
 	if (
 		commitId.length === 0 ||
 		Array.from(commitId).length > MAX_COMMIT_ID_CHARS
@@ -155,12 +161,15 @@ function validateCommitInput(args: {
 	}
 
 	const sourceText = args.sourceText.trim();
+
 	if (sourceText.length === 0) {
 		throwCaptionError("invalid_transcript", "Empty transcript");
 	}
+
 	if (Array.from(sourceText).length > MAX_SOURCE_TEXT_CHARS) {
 		throwCaptionError("invalid_transcript", "Transcript too long");
 	}
+
 	if (!Number.isSafeInteger(args.commitOrdinal) || args.commitOrdinal <= 0) {
 		throwCaptionError(
 			"invalid_commit_ordinal",
@@ -176,16 +185,21 @@ async function getOperatorSession(
 	sessionId: Id<"sessions">,
 ) {
 	const operatorId = await getCurrentOperatorId(ctx);
+
 	if (!operatorId) {
 		throwCaptionError("not_authenticated", "Not authenticated");
 	}
+
 	const session = await ctx.db.get("sessions", sessionId);
+
 	if (!session) {
 		throwCaptionError("session_not_found", "Session not found");
 	}
+
 	if (session.ownerId !== operatorId) {
 		throwCaptionError("unauthorized", "Unauthorized");
 	}
+
 	return session;
 }
 
@@ -218,6 +232,7 @@ async function hasPendingLiveCaptionTargets(
 			q.eq("priority", "live").eq("status", "pending"),
 		)
 		.first();
+
 	return target !== null;
 }
 
@@ -233,10 +248,13 @@ async function acceptCommitInTransaction(
 	},
 ) {
 	const session = await getOperatorSession(ctx, args.sessionId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throwCaptionError("session_deleting", "Session is being deleted");
 	}
+
 	const { commitId, sourceText } = validateCommitInput(args);
+
 	const sourceLanguage = resolveSourceLanguage(
 		args.sourceLanguage.trim() || undefined,
 		session.spokenLanguages,
@@ -246,6 +264,7 @@ async function acceptCommitInTransaction(
 		.query("acceptedCommits")
 		.withIndex("by_commit_id", (q) => q.eq("commitId", commitId))
 		.first();
+
 	if (existingAccepted) {
 		if (
 			existingAccepted.sessionId !== args.sessionId ||
@@ -259,16 +278,20 @@ async function acceptCommitInTransaction(
 				"Commit ID is already used for a different snapshot",
 			);
 		}
+
 		return toReceipt(existingAccepted);
 	}
 
 	const broadcast = await ctx.db.get("broadcasts", args.broadcastId);
+
 	if (!broadcast || broadcast.sessionId !== args.sessionId) {
 		throwCaptionError("broadcast_not_found", "Broadcast not found");
 	}
+
 	if (broadcast.status !== "active") {
 		throwCaptionError("broadcast_not_active", "Broadcast is no longer active");
 	}
+
 	if (args.commitOrdinal !== broadcast.lastCommitOrdinal + 1) {
 		throwCaptionError(
 			"broadcast_conflict",
@@ -277,11 +300,13 @@ async function acceptCommitInTransaction(
 	}
 
 	const mappingRevisionId = session.translationMappingRevisionId;
+
 	if (mappingRevisionId) {
 		const revision = await ctx.db.get(
 			"translationMappingRevisions",
 			mappingRevisionId,
 		);
+
 		if (!revision || revision.sessionId !== session._id) {
 			throwCaptionError(
 				"mapping_validation_error",
@@ -294,8 +319,10 @@ async function acceptCommitInTransaction(
 		session.audienceLanguages,
 		sourceLanguage,
 	);
+
 	const sequence = session.lastCommitSequence + 1;
-	const acceptedCommitId = await ctx.db.insert("acceptedCommits", {
+
+	const acceptedCommit = {
 		sessionId: args.sessionId,
 		broadcastId: args.broadcastId,
 		broadcastSequence: broadcast.sequence,
@@ -305,15 +332,21 @@ async function acceptCommitInTransaction(
 		sourceText,
 		sourceLanguage,
 		translationTargets,
-		...(mappingRevisionId
-			? { translationMappingRevisionId: mappingRevisionId }
-			: {}),
 		targetCount: translationTargets.length,
 		completedTargetCount: 0,
 		failedTargetCount: 0,
-		status: "pending",
-	});
+		status: "pending" as const,
+	};
+
+	const acceptedCommitId = await ctx.db.insert(
+		"acceptedCommits",
+		mappingRevisionId
+			? { ...acceptedCommit, translationMappingRevisionId: mappingRevisionId }
+			: acceptedCommit,
+	);
+
 	const targetIds: Id<"acceptedCommitTargets">[] = [];
+
 	for (const targetLanguage of translationTargets) {
 		targetIds.push(
 			await ctx.db.insert("acceptedCommitTargets", {
@@ -339,17 +372,22 @@ async function acceptCommitInTransaction(
 	});
 
 	const accepted = await getAcceptedCommitById(ctx, acceptedCommitId);
+
 	if (!accepted)
 		throw new Error("Accepted commit disappeared during acceptance");
+
 	if (targetIds.length === 0) {
 		await completeAcceptedCommit(ctx, { acceptedCommitId, completion: null });
 		const finished = await getAcceptedCommitById(ctx, acceptedCommitId);
+
 		if (!finished)
 			throw new Error("Accepted commit disappeared after publication");
+
 		return toReceipt(finished);
 	}
 
 	await enqueueCaptionTargets(ctx, acceptedCommitId, targetIds);
+
 	return toReceipt(accepted);
 }
 
@@ -371,31 +409,40 @@ export const retryCommit = mutation({
 	returns: acceptedCommitReceiptValidator,
 	handler: async (ctx, args) => {
 		const accepted = await getAcceptedCommitById(ctx, args.acceptedCommitId);
+
 		if (!accepted) {
 			throwCaptionError("commit_not_found", "Accepted commit not found");
 		}
+
 		const session = await getOperatorSession(ctx, accepted.sessionId);
+
 		if (session.deletionRequestedAt !== undefined) {
 			throwCaptionError("session_deleting", "Session is being deleted");
 		}
+
 		if (accepted.status === "pending") return toReceipt(accepted);
+
 		if (accepted.status !== "failed") return toReceipt(accepted);
 		const broadcast = await ctx.db.get("broadcasts", accepted.broadcastId);
+
 		if (!broadcast || broadcast.sessionId !== session._id) {
 			throwCaptionError("broadcast_not_found", "Broadcast not found");
 		}
+
 		if (broadcast.status !== "active") {
 			throwCaptionError(
 				"broadcast_not_active",
 				"Broadcast is no longer active",
 			);
 		}
+
 		const targets = await ctx.db
 			.query("acceptedCommitTargets")
 			.withIndex("by_accepted_commit_id_and_status", (q) =>
 				q.eq("acceptedCommitId", accepted._id),
 			)
 			.take(accepted.targetCount + 1);
+
 		if (targets.length !== accepted.targetCount || targets.length === 0) {
 			throwCaptionError(
 				"commit_conflict",
@@ -424,6 +471,7 @@ export const retryCommit = mutation({
 		await ctx.db.patch(broadcast._id, {
 			pendingCommitCount: broadcast.pendingCommitCount + 1,
 		});
+
 		if (await hasPendingLiveCaptionTargets(ctx)) {
 			await scheduleRetryDispatch(ctx);
 		} else {
@@ -434,8 +482,11 @@ export const retryCommit = mutation({
 				MAX_EXPLICIT_RETRY_DELAY_MS,
 			);
 		}
+
 		const retried = await getAcceptedCommitById(ctx, accepted._id);
+
 		if (!retried) throw new Error("Accepted commit disappeared during retry");
+
 		return toReceipt(retried);
 	},
 });
@@ -444,7 +495,8 @@ async function toOperatorCommit(ctx: QueryCtx, commit: AcceptedCommit) {
 	const segment = commit.segmentId
 		? await ctx.db.get("segments", commit.segmentId)
 		: null;
-	return {
+
+	const operatorCommit = {
 		acceptedCommitId: commit._id,
 		commitId: commit.commitId,
 		sessionId: commit.sessionId,
@@ -461,10 +513,13 @@ async function toOperatorCommit(ctx: QueryCtx, commit: AcceptedCommit) {
 		failedTargetCount: commit.failedTargetCount,
 		translations: segment?.translations ?? {},
 		segmentId: commit.segmentId ?? null,
-		...(commit.error || segment?.error
-			? { error: commit.error ?? segment?.error }
-			: {}),
 	};
+
+	const error = commit.error ?? segment?.error;
+
+	if (!error) return operatorCommit;
+
+	return { ...operatorCommit, error };
 }
 
 export const getOperatorCommit = query({
@@ -472,11 +527,15 @@ export const getOperatorCommit = query({
 	returns: v.union(operatorCommitValidator, v.null()),
 	handler: async (ctx, args) => {
 		const operatorId = await getCurrentOperatorId(ctx);
+
 		if (!operatorId) return null;
 		const commit = await getAcceptedCommitById(ctx, args.acceptedCommitId);
+
 		if (!commit) return null;
 		const session = await ctx.db.get("sessions", commit.sessionId);
+
 		if (!session || session.ownerId !== operatorId) return null;
+
 		return await toOperatorCommit(ctx, commit);
 	},
 });
@@ -489,6 +548,7 @@ export const listOperatorCommits = query({
 	returns: paginationResultValidator(operatorCommitValidator),
 	handler: async (ctx, args) => {
 		const session = await getOperatorSession(ctx, args.sessionId);
+
 		const page = await ctx.db
 			.query("acceptedCommits")
 			.withIndex("by_session_id_and_sequence", (q) =>
@@ -496,6 +556,7 @@ export const listOperatorCommits = query({
 			)
 			.order("desc")
 			.paginate(args.paginationOpts);
+
 		return {
 			...page,
 			page: await Promise.all(
@@ -516,9 +577,12 @@ export const getTargetForAction = internalQuery({
 	returns: targetContextValidator,
 	handler: async (ctx, args) => {
 		const target = await ctx.db.get("acceptedCommitTargets", args.targetId);
+
 		if (!target) return null;
 		const commit = await ctx.db.get("acceptedCommits", target.acceptedCommitId);
+
 		if (!commit || target.sessionId !== commit.sessionId) return null;
+
 		return {
 			targetId: target._id,
 			acceptedCommitId: commit._id,
@@ -547,12 +611,15 @@ function deferredTargetResult(
 	targetLanguage: string,
 	retryAfterMillis?: number,
 ) {
-	return {
+	const deferred = {
 		kind: "deferred" as const,
 		targetId,
 		targetLanguage,
-		...(retryAfterMillis === undefined ? {} : { retryAfterMillis }),
 	};
+
+	if (retryAfterMillis === undefined) return deferred;
+
+	return { ...deferred, retryAfterMillis };
 }
 
 export const translateTarget = internalAction({
@@ -585,6 +652,7 @@ export const translateTarget = internalAction({
 			internal.captions.getTargetForAction,
 			args,
 		);
+
 		if (!target) {
 			return failedTargetResult(
 				args.targetId,
@@ -592,6 +660,7 @@ export const translateTarget = internalAction({
 				"Translation target is unavailable",
 			);
 		}
+
 		if (target.status !== "pending") {
 			return failedTargetResult(
 				target.targetId,
@@ -599,25 +668,28 @@ export const translateTarget = internalAction({
 				"Translation target is no longer pending",
 			);
 		}
+
 		if (target.priority === "retry") {
 			const liveWorkPending: boolean = await ctx.runQuery(
 				internal.captions.hasPendingLiveTargets,
 				{},
 			);
+
 			if (liveWorkPending) {
 				return deferredTargetResult(target.targetId, target.targetLanguage);
 			}
 		}
 
 		let mappings: Doc<"translationMappingRevisions">["mappings"] = [];
+
 		if (target.translationMappingRevisionId) {
 			const revision = await ctx.runQuery(
 				internal.mappingRevisions.getForAction,
 				{
-					revisionId:
-						target.translationMappingRevisionId as Id<"translationMappingRevisions">,
+					revisionId: target.translationMappingRevisionId,
 				},
 			);
+
 			if (!revision) {
 				return failedTargetResult(
 					target.targetId,
@@ -625,11 +697,14 @@ export const translateTarget = internalAction({
 					"Translation mapping revision is unavailable",
 				);
 			}
+
 			mappings = revision.mappings;
 		}
-		const [document] = makeTranslationDocuments(target.sourceText, mappings, [
+
+		const [document] = translationDocuments(target.sourceText, mappings, [
 			target.targetLanguage,
 		]);
+
 		if (!document) {
 			return failedTargetResult(
 				target.targetId,
@@ -640,6 +715,7 @@ export const translateTarget = internalAction({
 
 		const program = Effect.gen(function* () {
 			const google = yield* GoogleTranslate;
+
 			return yield* google.translateOne(document, target.sourceLanguage).pipe(
 				Effect.map((translation) => ({
 					kind: "translated" as const,
@@ -714,6 +790,7 @@ export const translateTarget = internalAction({
 async function resumeDeferredRetry(ctx: MutationCtx): Promise<void> {
 	if (await hasPendingLiveCaptionTargets(ctx)) {
 		await scheduleRetryDispatch(ctx);
+
 		return;
 	}
 
@@ -723,11 +800,15 @@ async function resumeDeferredRetry(ctx: MutationCtx): Promise<void> {
 			q.eq("priority", "retry").eq("status", "pending"),
 		)
 		.take(RETRY_DISPATCH_BATCH_SIZE + 1);
+
 	const candidate = candidates.find((target) => target.workId === undefined);
+
 	if (!candidate) return;
 
 	const commit = await getAcceptedCommitById(ctx, candidate.acceptedCommitId);
+
 	if (commit?.status !== "pending") return;
+
 	const targetIds = candidates
 		.filter(
 			(target) =>
@@ -736,6 +817,7 @@ async function resumeDeferredRetry(ctx: MutationCtx): Promise<void> {
 				target.workId === undefined,
 		)
 		.map((target) => target._id);
+
 	if (targetIds.length === 0) return;
 
 	await Promise.all(
@@ -760,6 +842,7 @@ export const resumeDeferredRetries = internalMutation({
 	returns: v.null(),
 	handler: async (ctx) => {
 		await resumeDeferredRetry(ctx);
+
 		return null;
 	},
 });
@@ -780,10 +863,13 @@ async function mapTargetCompletion(
 		.query("acceptedCommitTargets")
 		.withIndex("by_work_id", (q) => q.eq("workId", args.workId))
 		.unique();
+
 	if (!target) return null;
+
 	if (target.acceptedCommitId !== args.context.acceptedCommitId) {
 		throw new Error("Translation completion commit identity mismatch");
 	}
+
 	return {
 		kind: "failed",
 		targetId: target._id,
@@ -803,6 +889,7 @@ export const targetCompleted = internalMutation({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const completion = await mapTargetCompletion(ctx, args);
+
 		if (completion) {
 			await completeAcceptedCommit(ctx, {
 				workId: args.workId,
@@ -810,6 +897,7 @@ export const targetCompleted = internalMutation({
 				completion,
 			});
 		}
+
 		return null;
 	},
 });

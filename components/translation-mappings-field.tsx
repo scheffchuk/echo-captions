@@ -97,12 +97,14 @@ export function TranslationMappingsField({
 	idFactory?: TranslationMappingIdFactory;
 }) {
 	const currentDraft = createTranslationMappingDraft({ rows: mappings });
+
 	const updateMapping = (
 		id: string,
 		patch: Partial<StoredTranslationMapping>,
 	) => {
 		onChange(updateTranslationMappingDraftRow(currentDraft, id, patch).rows);
 	};
+
 	const globalIssues = issues.filter((item) => item.rowId === "$draft");
 
 	return (

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Id } from "../_generated/dataModel";
+import { testId } from "@/test/ids";
 import {
 	classifyTargetCompletion,
 	MAX_PROVIDER_ATTEMPTS,
 	type TargetCompletion,
 } from "./acceptedCommitTerminalization";
 
-const targetId = "target-1" as Id<"acceptedCommitTargets">;
+const targetId = testId("acceptedCommitTargets", "target-1");
 
 const target = {
 	_id: targetId,
@@ -91,7 +91,7 @@ describe("accepted commit target terminalization policy", () => {
 		expect(() =>
 			classifyTargetCompletion(target, {
 				kind: "translated",
-				targetId: "other-target" as Id<"acceptedCommitTargets">,
+				targetId: testId("acceptedCommitTargets", "other-target"),
 				targetLanguage: "ja",
 				translation: "こんにちは",
 			}),

@@ -22,12 +22,16 @@ function identityFor(userId: Id<"users">) {
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+
 	return t;
 }
 
 type CaptionTest = ReturnType<typeof makeTest>;
 
-const workId = (value: string) => value as WorkId;
+const workId = (value: string) => {
+	// SAFETY: fixture strings stand in for workpool ids in tests that do not read the document.
+	return value as WorkId;
+};
 
 async function seedCaptionBroadcast(
 	t: CaptionTest,
@@ -39,7 +43,9 @@ async function seedCaptionBroadcast(
 			name: "Operator",
 		});
 	});
+
 	const operator = t.withIdentity(identityFor(operatorId));
+
 	const sessionId = await t.run(async (ctx) =>
 		ctx.db.insert("sessions", {
 			title: "Caption event",
@@ -51,9 +57,11 @@ async function seedCaptionBroadcast(
 			lastBroadcastSequence: 0,
 		}),
 	);
+
 	const broadcast = await operator.mutation(api.broadcasts.start, {
 		sessionId,
 	});
+
 	return { operator, sessionId, broadcastId: broadcast.broadcastId };
 }
 
@@ -76,6 +84,7 @@ describe("Convex-owned caption acceptance", () => {
 	it("accepts an idempotent commit and rejects a conflicting snapshot", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);
+
 		const args = {
 			sessionId,
 			broadcastId,
@@ -105,6 +114,7 @@ describe("Convex-owned caption acceptance", () => {
 				)
 				.collect(),
 		}));
+
 		expect(stored.commits).toHaveLength(1);
 		expect(stored.targets).toHaveLength(2);
 
@@ -118,9 +128,11 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("keeps repeated source text distinct across accepted commits", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 		]);
+
 		const first = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -129,6 +141,7 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "The same words",
 			sourceLanguage: "en",
 		});
+
 		const second = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -145,6 +158,7 @@ describe("Convex-owned caption acceptance", () => {
 	it("defers explicit retries while live targets are pending", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);
+
 		const original = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -153,6 +167,7 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Retry later",
 			sourceLanguage: "en",
 		});
+
 		const originalTargets = await acceptedTargets(t, original.acceptedCommitId);
 		await t.run(async (ctx) => {
 			for (const target of originalTargets) {
@@ -162,6 +177,7 @@ describe("Convex-owned caption acceptance", () => {
 					error: "Provider failure",
 				});
 			}
+
 			await ctx.db.patch(original.acceptedCommitId, {
 				status: "failed",
 				failedTargetCount: originalTargets.length,
@@ -179,9 +195,11 @@ describe("Convex-owned caption acceptance", () => {
 		await operator.mutation(api.captions.retryCommit, {
 			acceptedCommitId: original.acceptedCommitId,
 		});
+
 		const retryTarget = (
 			await acceptedTargets(t, original.acceptedCommitId)
 		)[0];
+
 		if (!retryTarget) throw new Error("Expected a retry target");
 		expect(retryTarget.priority).toBe("retry");
 		expect(retryTarget.workId).toBeUndefined();
@@ -198,10 +216,13 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("executes Workpool targets and atomically publishes provider failures", async () => {
 		vi.useFakeTimers();
+
 		try {
 			const t = makeTest();
+
 			const { operator, sessionId, broadcastId } =
 				await seedCaptionBroadcast(t);
+
 			const accepted = await operator.mutation(api.captions.acceptCommit, {
 				sessionId,
 				broadcastId,
@@ -216,6 +237,7 @@ describe("Convex-owned caption acceptance", () => {
 			const finished = await operator.query(api.captions.getOperatorCommit, {
 				acceptedCommitId: accepted.acceptedCommitId,
 			});
+
 			expect(finished).toMatchObject({
 				status: "failed",
 				failedTargetCount: 2,
@@ -227,10 +249,12 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("reschedules provider backoff durably outside the running action", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 			"ja",
 		]);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -239,7 +263,9 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Please retry later",
 			sourceLanguage: "en",
 		});
+
 		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (!target?.workId) throw new Error("Expected a scheduled target");
 		const previousWorkId = target.workId;
 
@@ -264,6 +290,7 @@ describe("Convex-owned caption acceptance", () => {
 		});
 		expect(rescheduled?.workId).toBeDefined();
 		expect(rescheduled?.workId).not.toBe(previousWorkId);
+
 		if (!rescheduled?.workId) throw new Error("Expected a rescheduled target");
 		await t.run(async (ctx) => {
 			await ctx.db.patch(rescheduled._id, { providerAttemptCount: 2 });
@@ -293,6 +320,7 @@ describe("Convex-owned caption acceptance", () => {
 	it("keeps partial target progress private until one atomic publication", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -301,10 +329,13 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Same words",
 			sourceLanguage: "en",
 		});
+
 		const targets = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (targets.length !== 2 || !targets[0] || !targets[1]) {
 			throw new Error("Expected two translation targets");
 		}
+
 		await t.run(async (ctx) => {
 			await ctx.db.patch(targets[0]._id, { workId: workId("caption-work-1") });
 			await ctx.db.patch(targets[1]._id, { workId: workId("caption-work-2") });
@@ -327,6 +358,7 @@ describe("Convex-owned caption acceptance", () => {
 		const partial = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(partial).toMatchObject({
 			status: "pending",
 			completedTargetCount: 1,
@@ -358,16 +390,19 @@ describe("Convex-owned caption acceptance", () => {
 		const finished = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(finished).toMatchObject({
 			status: "translated",
 			completedTargetCount: 2,
 			failedTargetCount: 0,
 			translations: { de: "同じ言葉", ja: "同じ言葉" },
 		});
+
 		const publicSegments = await operator.query(api.segments.listBySession, {
 			sessionId,
 			paginationOpts: { numItems: 10, cursor: null },
 		});
+
 		expect(publicSegments.page).toHaveLength(1);
 
 		await operator.mutation(internal.captions.targetCompleted, {
@@ -383,10 +418,12 @@ describe("Convex-owned caption acceptance", () => {
 				},
 			},
 		});
+
 		const afterReplay = await t.run(async (ctx) => ({
 			segments: await ctx.db.query("segments").collect(),
 			broadcast: await ctx.db.get("broadcasts", broadcastId),
 		}));
+
 		expect(afterReplay.segments).toHaveLength(1);
 		expect(afterReplay.broadcast?.pendingCommitCount).toBe(0);
 	});
@@ -394,6 +431,7 @@ describe("Convex-owned caption acceptance", () => {
 	it("publishes one failed Segment after a permanent target failure", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -402,10 +440,13 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Partial failure",
 			sourceLanguage: "en",
 		});
+
 		const targets = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (targets.length !== 2 || !targets[0] || !targets[1]) {
 			throw new Error("Expected two translation targets");
 		}
+
 		await t.run(async (ctx) => {
 			await ctx.db.patch(targets[0]._id, {
 				workId: workId("failure-work-1"),
@@ -445,6 +486,7 @@ describe("Convex-owned caption acceptance", () => {
 		const commit = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(commit).toMatchObject({
 			status: "failed",
 			completedTargetCount: 1,
@@ -452,9 +494,11 @@ describe("Convex-owned caption acceptance", () => {
 			translations: {},
 			error: "Translation failed",
 		});
+
 		const segments = await t.run(async (ctx) =>
 			ctx.db.query("segments").collect(),
 		);
+
 		expect(segments).toHaveLength(1);
 		expect(segments[0]).toMatchObject({
 			status: "failed",
@@ -464,10 +508,12 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("throws when a translated completion violates its trusted contract", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 			"ja",
 		]);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -476,7 +522,9 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Reject malformed success",
 			sourceLanguage: "en",
 		});
+
 		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (!target) throw new Error("Expected a translation target");
 		await t.run(async (ctx) => {
 			await ctx.db.patch(target._id, { workId: workId("malformed-work") });
@@ -501,10 +549,12 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("rejects a completion whose Workpool context names another commit", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 			"ja",
 		]);
+
 		const first = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -513,6 +563,7 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "First",
 			sourceLanguage: "en",
 		});
+
 		const second = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -521,7 +572,9 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Second",
 			sourceLanguage: "en",
 		});
+
 		const [target] = await acceptedTargets(t, first.acceptedCommitId);
+
 		if (!target) throw new Error("Expected a translation target");
 		await t.run(async (ctx) => {
 			await ctx.db.patch(target._id, { workId: workId("identity-work") });
@@ -546,10 +599,12 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("requeues a failed commit without changing its identity", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 			"ja",
 		]);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
@@ -558,7 +613,9 @@ describe("Convex-owned caption acceptance", () => {
 			sourceText: "Retry me",
 			sourceLanguage: "en",
 		});
+
 		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (!target) throw new Error("Expected a translation target");
 		await t.run(async (ctx) => {
 			await ctx.db.patch(target._id, { workId: workId("retry-work") });
@@ -577,14 +634,17 @@ describe("Convex-owned caption acceptance", () => {
 				},
 			},
 		});
+
 		const failedSegment = await t.run(async (ctx) =>
 			ctx.db.query("segments").first(),
 		);
+
 		if (!failedSegment) throw new Error("Expected a failed Segment");
 
 		const retried = await operator.mutation(api.captions.retryCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(retried).toMatchObject({
 			acceptedCommitId: accepted.acceptedCommitId,
 			commitId: "caption-retry",
@@ -594,9 +654,11 @@ describe("Convex-owned caption acceptance", () => {
 			segmentId: expect.any(String),
 		});
 		expect(retried.segmentId).toBe(failedSegment._id);
+
 		const pending = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(pending?.status).toBe("pending");
 		expect(
 			await operator.query(api.segments.listBySession, {
@@ -607,6 +669,7 @@ describe("Convex-owned caption acceptance", () => {
 			page: [{ sourceText: "Retry me", status: "failed" }],
 		});
 		const [retryTarget] = await acceptedTargets(t, accepted.acceptedCommitId);
+
 		if (!retryTarget?.workId) throw new Error("Expected a retry Workpool job");
 		await operator.mutation(internal.captions.targetCompleted, {
 			workId: workId(retryTarget.workId),
@@ -621,9 +684,11 @@ describe("Convex-owned caption acceptance", () => {
 				},
 			},
 		});
+
 		const recovered = await operator.query(api.captions.getOperatorCommit, {
 			acceptedCommitId: accepted.acceptedCommitId,
 		});
+
 		expect(recovered).toMatchObject({
 			status: "translated",
 			segmentId: failedSegment._id,
@@ -641,9 +706,11 @@ describe("Convex-owned caption acceptance", () => {
 
 	it("finishes immediately when the source is the only audience language", async () => {
 		const t = makeTest();
+
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
 			"en",
 		]);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,

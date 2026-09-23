@@ -67,6 +67,7 @@ export function classifyTargetCompletion(
 		if (!completion.translation.trim()) {
 			throw new Error("Translated completion has no translation");
 		}
+
 		return {
 			kind: "terminal",
 			status: "translated",
@@ -78,6 +79,7 @@ export function classifyTargetCompletion(
 		if (!completion.error.trim()) {
 			throw new Error("Failed completion has no error classification");
 		}
+
 		return { kind: "terminal", status: "failed", error: completion.error };
 	}
 
@@ -88,7 +90,9 @@ export function classifyTargetCompletion(
 		) {
 			throw new Error("Deferred completion has an invalid retry delay");
 		}
+
 		const providerAttemptCount = (target.providerAttemptCount ?? 0) + 1;
+
 		if (providerAttemptCount < MAX_PROVIDER_ATTEMPTS) {
 			return {
 				kind: "retry",
@@ -96,6 +100,7 @@ export function classifyTargetCompletion(
 				retryAfterMillis: completion.retryAfterMillis,
 			};
 		}
+
 		return {
 			kind: "terminal",
 			status: "failed",
@@ -106,10 +111,12 @@ export function classifyTargetCompletion(
 	if (target.priority !== "retry") {
 		throw new Error("Live translation target cannot be deferred");
 	}
+
 	return { kind: "defer" };
 }
 
 type AcceptedCommit = Doc<"acceptedCommits">;
+
 type AcceptedCommitTarget = Doc<"acceptedCommitTargets">;
 
 type CompleteAcceptedCommitInput =
@@ -133,28 +140,37 @@ async function createFinishedSegment(
 	const existing = commit.segmentId
 		? await ctx.db.get("segments", commit.segmentId)
 		: null;
+
 	if (commit.segmentId && !existing) {
 		throw new Error("Accepted commit references a missing Segment");
 	}
+
 	if (existing && existing.acceptedCommitId !== commit._id) {
 		throw new Error("Accepted commit references the wrong Segment");
 	}
+
+	const segmentFields = {
+		sessionId: commit.sessionId,
+		broadcastId: commit.broadcastId,
+		broadcastSequence: commit.broadcastSequence,
+		commitOrdinal: commit.commitOrdinal,
+		commitId: commit.commitId,
+		sequence: commit.sequence,
+		sourceText: commit.sourceText,
+		sourceLanguage: commit.sourceLanguage,
+		status,
+		translations,
+		acceptedCommitId: commit._id,
+	};
+
 	const segmentId =
 		existing?._id ??
-		(await ctx.db.insert("segments", {
-			sessionId: commit.sessionId,
-			broadcastId: commit.broadcastId,
-			broadcastSequence: commit.broadcastSequence,
-			commitOrdinal: commit.commitOrdinal,
-			commitId: commit.commitId,
-			sequence: commit.sequence,
-			sourceText: commit.sourceText,
-			sourceLanguage: commit.sourceLanguage,
-			status,
-			translations,
-			acceptedCommitId: commit._id,
-			...(status === "failed" && error ? { error } : {}),
-		}));
+		(await ctx.db.insert(
+			"segments",
+			status === "failed" && error
+				? { ...segmentFields, error }
+				: segmentFields,
+		));
 
 	if (existing) {
 		await ctx.db.patch(existing._id, {
@@ -175,6 +191,7 @@ async function finishAcceptedCommit(
 	if (decrementPendingCount) {
 		await finishCommitDrain(ctx, commit.broadcastId);
 	}
+
 	await scheduleRetryDispatch(ctx, 0);
 }
 
@@ -185,28 +202,34 @@ async function publishAcceptedCommit(
 	decrementPendingCount: boolean,
 ) {
 	const failedTargets = targets.filter((target) => target.status === "failed");
+
 	const translatedTargets = targets.filter(
 		(target) => target.status === "translated",
 	);
+
 	if (
 		targets.length !== commit.targetCount ||
 		translatedTargets.length + failedTargets.length !== commit.targetCount
 	) {
 		throw new Error("Accepted commit target state is incomplete");
 	}
+
 	const failed = failedTargets.length > 0;
 	const translations: Record<string, string> = {};
+
 	if (!failed) {
 		for (const target of translatedTargets) {
 			if (!target.translation?.trim()) {
 				throw new Error("Translated target has no translation");
 			}
+
 			translations[target.targetLanguage] = target.translation;
 		}
 	}
 
 	const status = failed ? ("failed" as const) : ("translated" as const);
 	const error = failed ? "Translation failed" : undefined;
+
 	const segmentId = await createFinishedSegment(
 		ctx,
 		commit,
@@ -214,6 +237,7 @@ async function publishAcceptedCommit(
 		failed ? {} : translations,
 		error,
 	);
+
 	await ctx.db.patch(commit._id, {
 		status,
 		completedTargetCount: translatedTargets.length,
@@ -238,27 +262,38 @@ export async function completeAcceptedCommit(
 ) {
 	if (input.completion === null) {
 		const commit = await ctx.db.get("acceptedCommits", input.acceptedCommitId);
+
 		if (!commit) return;
+
 		if (commit.status !== "pending") return;
+
 		if (commit.targetCount !== 0) {
 			throw new Error("Accepted commit has unexpected zero-target completion");
 		}
+
 		await publishAcceptedCommit(ctx, commit, [], false);
+
 		return;
 	}
 
 	const target = await getTargetByWorkId(ctx, input.workId);
+
 	if (!target) return;
+
 	if (target.acceptedCommitId !== input.acceptedCommitId) {
 		throw new Error("Translation completion commit identity mismatch");
 	}
+
 	const commit = await ctx.db.get("acceptedCommits", input.acceptedCommitId);
+
 	if (!commit) {
 		throw new Error("Translation target references a missing Accepted commit");
 	}
+
 	if (commit.status !== "pending" || target.status !== "pending") return;
 
 	const decision = classifyTargetCompletion(target, input.completion);
+
 	if (decision.kind === "retry") {
 		await ctx.db.patch(target._id, {
 			providerAttemptCount: decision.providerAttemptCount,
@@ -269,11 +304,14 @@ export async function completeAcceptedCommit(
 			[target._id],
 			decision.retryAfterMillis,
 		);
+
 		return;
 	}
+
 	if (decision.kind === "defer") {
 		await ctx.db.patch(target._id, { workId: undefined });
 		await scheduleRetryDispatch(ctx);
+
 		return;
 	}
 
@@ -285,28 +323,35 @@ export async function completeAcceptedCommit(
 		workId: undefined,
 		providerAttemptCount: undefined,
 	});
+
 	const targets = await ctx.db
 		.query("acceptedCommitTargets")
 		.withIndex("by_accepted_commit_id_and_status", (q) =>
 			q.eq("acceptedCommitId", commit._id),
 		)
 		.take(commit.targetCount + 1);
+
 	if (targets.length !== commit.targetCount) {
 		throw new Error("Accepted commit target count mismatch");
 	}
+
 	const completedTargetCount = targets.filter(
 		(item) => item.status === "translated",
 	).length;
+
 	const failedTargetCount = targets.filter(
 		(item) => item.status === "failed",
 	).length;
+
 	await ctx.db.patch(commit._id, {
 		completedTargetCount,
 		failedTargetCount,
 	});
+
 	if (targets.some((item) => item.status === "pending")) return;
 
 	const refreshed = await ctx.db.get("acceptedCommits", commit._id);
+
 	if (refreshed?.status !== "pending") return;
 	await publishAcceptedCommit(ctx, refreshed, targets, true);
 }

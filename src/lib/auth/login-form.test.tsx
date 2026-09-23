@@ -125,6 +125,7 @@ describe("LoginForm", () => {
 			.fn()
 			.mockRejectedValueOnce(new Error("Invalid credentials"))
 			.mockResolvedValueOnce(undefined);
+
 		const user = userEvent.setup();
 		render(
 			<LoginForm
@@ -159,11 +160,13 @@ describe("LoginForm", () => {
 
 	it("prevents duplicate sign-in actions while submission is pending", async () => {
 		let resolveSignIn!: () => void;
+
 		const signInWithPassword = vi.fn().mockReturnValue(
 			new Promise<void>((resolve) => {
 				resolveSignIn = resolve;
 			}),
 		);
+
 		const user = userEvent.setup();
 		render(
 			<LoginForm

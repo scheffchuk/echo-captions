@@ -9,6 +9,7 @@ import {
 } from "@/lib/viewer-preferences";
 
 const languagePairKey = "echo-viewer-langs:conference";
+
 const textSizeKey = "echo-viewer-text-size";
 
 describe("viewer preferences", () => {

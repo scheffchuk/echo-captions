@@ -10,6 +10,7 @@ import {
 } from "../../src/lib/translationMappings";
 
 export type TranslationMapping = StoredTranslationMapping;
+
 export {
 	canonicalTranslationMappingsEqual,
 	filterMappingsForAudience,
@@ -65,11 +66,13 @@ export function canonicalizeTranslationMappings(
 	audienceLanguages: ReadonlyArray<string>,
 ): TranslationMapping[] {
 	const result = canonicalizeMappingPolicy(mappings, audienceLanguages);
+
 	if (!result.ok) {
 		throw new MappingValidationError({
 			message: result.issues.map((issue) => issue.message).join(" "),
 		});
 	}
+
 	return result.mappings;
 }
 
@@ -99,6 +102,7 @@ function findCandidates(
 	mappingIndex: number,
 ): Candidate[] {
 	const term = Array.from(mapping.term);
+
 	if (term.length === 0) return [];
 	const foldedTerm = folded(mapping.term);
 	const boundaryBased = !hasNoWordSeparators(mapping.term);
@@ -107,17 +111,21 @@ function findCandidates(
 	for (let start = 0; start < text.length; start += 1) {
 		let foldedCandidate = "";
 		let end = start;
+
 		while (end < text.length && foldedCandidate.length < foldedTerm.length) {
 			foldedCandidate += folded(text[end] ?? "");
 			end += 1;
 		}
+
 		if (foldedCandidate !== foldedTerm) continue;
+
 		if (
 			boundaryBased &&
 			(isLetterOrNumber(text[start - 1]) || isLetterOrNumber(text[end]))
 		) {
 			continue;
 		}
+
 		candidates.push({
 			start,
 			end,
@@ -126,6 +134,7 @@ function findCandidates(
 			mapping,
 		});
 	}
+
 	return candidates;
 }
 
@@ -140,6 +149,7 @@ function selectMatches(
 	const candidates = mappings.flatMap((mapping, mappingIndex) =>
 		findCandidates(text, mapping, mappingIndex),
 	);
+
 	// Longest-first gives an overlapping span ownership of the source text.
 	// Start and mapping order make equal-length choices deterministic.
 	candidates.sort(
@@ -150,16 +160,18 @@ function selectMatches(
 	);
 
 	const selected: Candidate[] = [];
+
 	for (const candidate of candidates) {
 		if (selected.some((other) => overlaps(candidate, other))) continue;
 		selected.push(candidate);
 	}
+
 	return selected.sort(
 		(left, right) => left.start - right.start || left.end - right.end,
 	);
 }
 
-export function makeTranslationDocuments(
+export function translationDocuments(
 	sourceText: string,
 	mappings: ReadonlyArray<TranslationMapping>,
 	targetLanguages: ReadonlyArray<string>,
@@ -169,10 +181,12 @@ export function makeTranslationDocuments(
 
 	return targetLanguages.map((rawTargetLanguage) => {
 		const targetLanguage = normalizeLanguageCode(rawTargetLanguage);
+
 		const targetMappings = mappings.filter(
 			(mapping) =>
 				normalizeLanguageCode(mapping.targetLanguage) === targetLanguage,
 		);
+
 		const matches = selectMatches(sourceCharacters, targetMappings);
 
 		if (matches.length === 0) {
@@ -189,6 +203,7 @@ export function makeTranslationDocuments(
 
 		for (const [occurrenceIndex, match] of matches.entries()) {
 			const before = sourceCharacters.slice(previousEnd, match.start).join("");
+
 			if (before) {
 				spans.push({ kind: "text", text: before });
 			}
@@ -199,12 +214,14 @@ export function makeTranslationDocuments(
 				sourceText: sourceCharacters.slice(match.start, match.end).join(""),
 				replacement: match.mapping.translation,
 			};
+
 			spans.push(fixed);
 			fixedSpans.push(fixed);
 			previousEnd = match.end;
 		}
 
 		const after = sourceCharacters.slice(previousEnd).join("");
+
 		if (after) {
 			spans.push({ kind: "text", text: after });
 		}

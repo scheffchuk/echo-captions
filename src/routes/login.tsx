@@ -26,6 +26,28 @@ export const Route = createFileRoute("/login")({
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { redirect } = Route.useSearch();
+	const auth = useOperatorAuth();
+
+	return (
+		<LoginView
+			redirect={redirect}
+			navigate={(options) => {
+				void navigate(options);
+			}}
+			auth={auth}
+		/>
+	);
+}
+
+export function LoginView({
+	redirect,
+	navigate,
+	auth,
+}: {
+	redirect: string | undefined;
+	navigate: (options: { href: string }) => void;
+	auth: ReturnType<typeof useOperatorAuth>;
+}) {
 	const {
 		status,
 		isOperator,
@@ -33,7 +55,8 @@ export function LoginPage() {
 		canSignUp,
 		signInWithPassword,
 		signOut,
-	} = useOperatorAuth();
+	} = auth;
+
 	const destination = normalizeReturnTo(redirect, getBrowserOrigin());
 	const hasNavigated = useRef(false);
 
@@ -102,6 +125,7 @@ export function LoginForm({
 	const [flow, setFlow] = useState<LoginFlow>(
 		canSignUp ? defaultFlow : "signIn",
 	);
+
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,14 +136,18 @@ export function LoginForm({
 
 	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
+
 		if (isSubmitting) return;
+
 		if (email.length === 0 || password.length < 8) {
 			setShowValidation(true);
+
 			return;
 		}
 
 		setSubmitError(null);
 		setIsSubmitting(true);
+
 		try {
 			await signInWithPassword({ email, password, flow });
 		} catch (error) {

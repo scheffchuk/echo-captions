@@ -1,4 +1,8 @@
 import { ConvexError, v } from "convex/values";
+import {
+	isTaggedPublicError,
+	publicErrorCode,
+} from "../shared/tagged-public-error";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -49,10 +53,15 @@ import {
 } from "./schema";
 
 const SEGMENT_DELETE_BATCH_SIZE = 100;
+
 const ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE = 100;
+
 const ACCEPTED_COMMIT_DELETE_BATCH_SIZE = 100;
+
 const BROADCAST_DELETE_BATCH_SIZE = 100;
+
 const MAPPING_REVISION_DELETE_BATCH_SIZE = 100;
+
 const publicErrorCodes = {
 	...authErrorCodes,
 	...languageErrorCodes,
@@ -106,30 +115,18 @@ type EventFields = {
 	translationMappings?: TranslationMapping[];
 };
 
-type TaggedPublicError = {
-	readonly _tag: string;
-	readonly message: string;
-};
-
-function isTaggedPublicError(error: unknown): error is TaggedPublicError {
-	if (typeof error !== "object" || error === null) return false;
-	const candidate = error as { _tag?: unknown; message?: unknown };
-	return (
-		typeof candidate._tag === "string" && typeof candidate.message === "string"
-	);
-}
-
 async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
 	try {
 		return await operation();
 	} catch (error) {
 		if (isTaggedPublicError(error)) {
-			const code =
-				publicErrorCodes[error._tag as keyof typeof publicErrorCodes];
+			const code = publicErrorCode(publicErrorCodes, error._tag);
+
 			if (code !== undefined) {
 				throw new ConvexError({ code, message: error.message });
 			}
 		}
+
 		throw error;
 	}
 }
@@ -139,15 +136,18 @@ async function getCurrentMappingRevision(
 	session: Doc<"sessions">,
 ) {
 	if (session.translationMappingRevisionId === undefined) return null;
+
 	const revision = await ctx.db.get(
 		"translationMappingRevisions",
-		session.translationMappingRevisionId as Id<"translationMappingRevisions">,
+		session.translationMappingRevisionId,
 	);
+
 	if (!revision || revision.sessionId !== session._id) {
 		throw new MappingValidationError({
 			message: "The Session mapping revision is unavailable",
 		});
 	}
+
 	return revision;
 }
 
@@ -163,6 +163,7 @@ async function nextMappingRevision(
 		)
 		.order("desc")
 		.first();
+
 	return await ctx.db.insert("translationMappingRevisions", {
 		sessionId,
 		revision: (latest?.revision ?? 0) + 1,
@@ -176,18 +177,22 @@ async function createSession(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const spokenLanguages = validateSpokenLanguages(args.spokenLanguages);
+
 	const audienceLanguagesExtra = validateAudienceLanguagesExtra(
 		spokenLanguages,
 		args.audienceLanguagesExtra,
 	);
+
 	const audienceLanguages = computeAudienceLanguages(
 		spokenLanguages,
 		audienceLanguagesExtra,
 	);
+
 	const mappings = canonicalizeTranslationMappings(
 		args.translationMappings ?? [],
 		audienceLanguages,
 	);
+
 	const slug = await uniqueSessionSlug(ctx);
 	const reservedAt = Date.now();
 
@@ -200,6 +205,7 @@ async function createSession(
 	} = args;
 
 	await ctx.db.insert("sessionSlugs", { slug, reservedAt });
+
 	const sessionId = await ctx.db.insert("sessions", {
 		title: title.trim() || "Untitled",
 		slug,
@@ -210,6 +216,7 @@ async function createSession(
 		lastBroadcastSequence: 0,
 		...rest,
 	});
+
 	if (mappings.length > 0) {
 		const revisionId = await nextMappingRevision(ctx, sessionId, mappings);
 		await ctx.db.patch(sessionId, { translationMappingRevisionId: revisionId });
@@ -223,7 +230,9 @@ async function getPublicBySlug(ctx: QueryCtx, slug: string) {
 		.query("sessions")
 		.withIndex("by_slug", (q) => q.eq("slug", slug))
 		.unique();
+
 	if (!session || session.deletionRequestedAt !== undefined) return null;
+
 	return {
 		_id: session._id,
 		title: session.title,
@@ -240,13 +249,16 @@ async function readSessionTranslationMappings(
 	session: Doc<"sessions">,
 ) {
 	if (!session.translationMappingRevisionId) return [];
+
 	const mappingRevision = await ctx.db.get(
 		"translationMappingRevisions",
-		session.translationMappingRevisionId as Id<"translationMappingRevisions">,
+		session.translationMappingRevisionId,
 	);
+
 	if (!mappingRevision || mappingRevision.sessionId !== session._id) {
 		throw new Error("Session mapping revision is unavailable");
 	}
+
 	return mappingRevision.mappings;
 }
 
@@ -277,12 +289,15 @@ async function patchDescription(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	await ctx.db.patch(sessionId, {
 		description: description.trim() || undefined,
 	});
+
 	return null;
 }
 
@@ -296,34 +311,43 @@ async function patchTranslationMappings(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, args.sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	const audienceLanguages = normalizeLanguageList(session.audienceLanguages);
+
 	const mappings = canonicalizeTranslationMappings(
 		args.translationMappings,
 		audienceLanguages,
 	);
+
 	const currentRevision = await getCurrentMappingRevision(ctx, session);
 	const currentRevisionId = session.translationMappingRevisionId ?? null;
+
 	if (args.expectedRevisionId !== currentRevisionId) {
 		throw new MappingRevisionConflict({
 			message: "Glossary changed elsewhere. Reload it before saving.",
 		});
 	}
+
 	if (
 		currentRevision &&
 		canonicalTranslationMappingsEqual(currentRevision.mappings, mappings)
 	) {
 		return { revisionId: currentRevision._id, changed: false };
 	}
+
 	if (!currentRevision && mappings.length === 0) {
 		return { revisionId: null, changed: false };
 	}
+
 	if (mappings.length === 0) {
 		await ctx.db.patch(args.sessionId, {
 			translationMappingRevisionId: undefined,
 		});
+
 		return { revisionId: null, changed: true };
 	}
 
@@ -331,6 +355,7 @@ async function patchTranslationMappings(
 	await ctx.db.patch(args.sessionId, {
 		translationMappingRevisionId: revisionId,
 	});
+
 	return { revisionId, changed: true };
 }
 
@@ -344,19 +369,25 @@ async function patchLanguages(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, args.sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	const spokenLanguages = validateSpokenLanguages(args.spokenLanguages);
+
 	const audienceLanguagesExtra = validateAudienceLanguagesExtra(
 		spokenLanguages,
 		args.audienceLanguagesExtra,
 	);
+
 	const audienceLanguages = computeAudienceLanguages(
 		spokenLanguages,
 		audienceLanguagesExtra,
 	);
+
 	const currentRevision = await getCurrentMappingRevision(ctx, session);
+
 	const mappings = canonicalizeTranslationMappings(
 		filterMappingsForAudience(
 			currentRevision?.mappings ?? [],
@@ -364,7 +395,9 @@ async function patchLanguages(
 		),
 		audienceLanguages,
 	);
+
 	let translationMappingRevisionId = session.translationMappingRevisionId;
+
 	if (
 		!currentRevision ||
 		!canonicalTranslationMappingsEqual(currentRevision.mappings, mappings)
@@ -380,6 +413,7 @@ async function patchLanguages(
 		audienceLanguages,
 		translationMappingRevisionId,
 	});
+
 	return null;
 }
 
@@ -390,18 +424,22 @@ async function patchTitle(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	await ctx.db.patch(sessionId, {
 		title: title.trim() || "Untitled",
 	});
+
 	return null;
 }
 
 async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) return null;
 
 	const broadcastProjection = await readBroadcastProjection(
@@ -409,6 +447,7 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 		sessionId,
 		"owner",
 	);
+
 	if (broadcastProjection.activeBroadcast) {
 		throw new InvalidSessionTransition({
 			message:
@@ -422,6 +461,7 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 			q.eq("sessionId", sessionId).eq("status", "pending"),
 		)
 		.first();
+
 	if (pendingAcceptedCommit) {
 		throw new SessionBusy({
 			message: "Wait for active translations to finish before deleting",
@@ -432,6 +472,7 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 		.query("sessionSlugs")
 		.withIndex("by_slug", (q) => q.eq("slug", session.slug))
 		.unique();
+
 	if (!slugReservation) {
 		await ctx.db.insert("sessionSlugs", {
 			slug: session.slug,
@@ -441,11 +482,13 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 
 	await ctx.db.patch(sessionId, { deletionRequestedAt: Date.now() });
 	await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, { sessionId });
+
 	return null;
 }
 
 async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 	const session = await ctx.db.get("sessions", sessionId);
+
 	if (!session || session.deletionRequestedAt === undefined) return null;
 
 	const segments = await ctx.db
@@ -454,6 +497,7 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 			q.eq("sessionId", sessionId),
 		)
 		.take(SEGMENT_DELETE_BATCH_SIZE + 1);
+
 	for (const segment of segments.slice(0, SEGMENT_DELETE_BATCH_SIZE)) {
 		await ctx.db.delete("segments", segment._id);
 	}
@@ -462,6 +506,7 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
 			sessionId,
 		});
+
 		return null;
 	}
 
@@ -469,16 +514,19 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 		.query("acceptedCommitTargets")
 		.withIndex("by_session_id", (q) => q.eq("sessionId", sessionId))
 		.take(ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE + 1);
+
 	for (const target of acceptedCommitTargets.slice(
 		0,
 		ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE,
 	)) {
 		await ctx.db.delete("acceptedCommitTargets", target._id);
 	}
+
 	if (acceptedCommitTargets.length > ACCEPTED_COMMIT_TARGET_DELETE_BATCH_SIZE) {
 		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
 			sessionId,
 		});
+
 		return null;
 	}
 
@@ -488,16 +536,19 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 			q.eq("sessionId", sessionId),
 		)
 		.take(ACCEPTED_COMMIT_DELETE_BATCH_SIZE + 1);
+
 	for (const commit of acceptedCommits.slice(
 		0,
 		ACCEPTED_COMMIT_DELETE_BATCH_SIZE,
 	)) {
 		await ctx.db.delete("acceptedCommits", commit._id);
 	}
+
 	if (acceptedCommits.length > ACCEPTED_COMMIT_DELETE_BATCH_SIZE) {
 		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
 			sessionId,
 		});
+
 		return null;
 	}
 
@@ -507,13 +558,16 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 			q.eq("sessionId", sessionId),
 		)
 		.take(BROADCAST_DELETE_BATCH_SIZE + 1);
+
 	for (const broadcast of broadcasts.slice(0, BROADCAST_DELETE_BATCH_SIZE)) {
 		await ctx.db.delete("broadcasts", broadcast._id);
 	}
+
 	if (broadcasts.length > BROADCAST_DELETE_BATCH_SIZE) {
 		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
 			sessionId,
 		});
+
 		return null;
 	}
 
@@ -523,20 +577,24 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 			q.eq("sessionId", sessionId),
 		)
 		.take(MAPPING_REVISION_DELETE_BATCH_SIZE + 1);
+
 	for (const revision of mappingRevisions.slice(
 		0,
 		MAPPING_REVISION_DELETE_BATCH_SIZE,
 	)) {
 		await ctx.db.delete("translationMappingRevisions", revision._id);
 	}
+
 	if (mappingRevisions.length > MAPPING_REVISION_DELETE_BATCH_SIZE) {
 		await ctx.scheduler.runAfter(0, internal.sessions.deleteBatch, {
 			sessionId,
 		});
+
 		return null;
 	}
 
 	await ctx.db.delete("sessions", sessionId);
+
 	return null;
 }
 
@@ -555,14 +613,17 @@ export const listMine = query({
 	returns: v.union(v.array(sessionViewValidator), v.null()),
 	handler: async (ctx) => {
 		const ownerId = await getCurrentOperatorId(ctx);
+
 		if (!ownerId) {
 			return null;
 		}
+
 		const sessions = await ctx.db
 			.query("sessions")
 			.withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
 			.order("desc")
 			.collect();
+
 		return await Promise.all(
 			sessions.map((session) => getSessionView(ctx, session)),
 		);
@@ -580,14 +641,18 @@ export const getMineBySlug = query({
 	returns: v.union(sessionViewValidator, v.null()),
 	handler: async (ctx, args) => {
 		const ownerId = await getCurrentOperatorId(ctx);
+
 		if (!ownerId) {
 			return null;
 		}
+
 		const session = await ctx.db
 			.query("sessions")
 			.withIndex("by_slug", (q) => q.eq("slug", args.slug))
 			.unique();
+
 		if (!session || session.ownerId !== ownerId) return null;
+
 		return await getSessionView(ctx, session);
 	},
 });

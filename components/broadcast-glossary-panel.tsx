@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation } from "convex/react";
+import { Match } from "effect";
 import { BookText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -42,6 +43,15 @@ import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
+type UpdateTranslationMappings = (args: {
+	sessionId: Id<"sessions">;
+	translationMappings: StoredTranslationMapping[];
+	expectedRevisionId: Id<"translationMappingRevisions"> | null;
+}) => Promise<{
+	revisionId: Id<"translationMappingRevisions"> | null;
+	changed: boolean;
+}>;
+
 export function BroadcastGlossaryPanel({
 	sessionId,
 	initialMappings,
@@ -64,6 +74,43 @@ export function BroadcastGlossaryPanel({
 	const updateTranslationMappings = useMutation(
 		api.sessions.updateTranslationMappings,
 	);
+
+	return (
+		<BroadcastGlossaryPanelView
+			sessionId={sessionId}
+			initialMappings={initialMappings}
+			initialRevisionId={initialRevisionId}
+			audienceCodes={audienceCodes}
+			trigger={trigger}
+			className={className}
+			open={openProp}
+			onOpenChange={onOpenChangeProp}
+			updateTranslationMappings={updateTranslationMappings}
+		/>
+	);
+}
+
+export function BroadcastGlossaryPanelView({
+	sessionId,
+	initialMappings,
+	initialRevisionId,
+	audienceCodes,
+	trigger = "card",
+	className,
+	open: openProp,
+	onOpenChange: onOpenChangeProp,
+	updateTranslationMappings,
+}: {
+	sessionId: Id<"sessions">;
+	initialMappings: StoredTranslationMapping[] | undefined;
+	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
+	audienceCodes: string[];
+	trigger?: "card" | "button" | "none";
+	className?: string;
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
+	updateTranslationMappings: UpdateTranslationMappings;
+}) {
 	const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
 	const [discardOpen, setDiscardOpen] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -71,10 +118,12 @@ export function BroadcastGlossaryPanel({
 
 	const isControlled = openProp !== undefined;
 	const open = isControlled ? openProp : uncontrolledOpen;
+
 	const setOpen = (next: boolean) => {
 		if (!isControlled) setUncontrolledOpen(next);
 		onOpenChangeProp?.(next);
 	};
+
 	const hydrateCurrentDraft = useCallback(
 		() =>
 			hydrateTranslationMappingDraft(
@@ -88,18 +137,23 @@ export function BroadcastGlossaryPanel({
 	const [draft, setDraft] = useState<TranslationMappingDraft>(() =>
 		hydrateCurrentDraft(),
 	);
+
 	const wasOpenRef = useRef(false);
 
 	useEffect(() => {
 		if (!open) {
 			wasOpenRef.current = false;
+
 			return;
 		}
+
 		if (!wasOpenRef.current) {
 			setDraft(hydrateCurrentDraft());
 			wasOpenRef.current = true;
+
 			return;
 		}
+
 		setDraft((current) =>
 			reconcileTranslationMappingDraft(
 				current,
@@ -122,12 +176,15 @@ export function BroadcastGlossaryPanel({
 		() => projectTranslationMappingDraft(draft, audienceCodes),
 		[draft, audienceCodes],
 	);
+
 	const issues = projection.ok ? [] : projection.issues;
+
 	const isDirty = isTranslationMappingDraftDirty(
 		draft,
 		audienceCodes,
 		projection,
 	);
+
 	const conflict = draft.conflict;
 
 	const discardAndClose = () => {
@@ -140,12 +197,16 @@ export function BroadcastGlossaryPanel({
 		if (next) {
 			setDraft(hydrateCurrentDraft());
 			setOpen(true);
+
 			return;
 		}
+
 		if (isDirty) {
 			setDiscardOpen(true);
+
 			return;
 		}
+
 		setOpen(false);
 	};
 
@@ -155,28 +216,31 @@ export function BroadcastGlossaryPanel({
 
 	const save = async () => {
 		const input = projection;
+
 		if (!input.ok) {
 			return;
 		}
 
 		setSaving(true);
+
 		try {
 			await updateTranslationMappings({
 				sessionId,
 				translationMappings: input.mappings,
-				expectedRevisionId: draft.baseRevisionId
-					? (draft.baseRevisionId as Id<"translationMappingRevisions">)
-					: null,
+				expectedRevisionId: draft.baseRevisionId,
 			});
 			toast.success("Glossary saved");
 			setOpen(false);
 		} catch (error) {
 			const failure = getPublicConvexError(error, "Couldn't save glossary");
+
 			if (failure.code === "mapping_revision_conflict") {
 				setDraft((current) => markTranslationMappingDraftConflict(current));
 				toast.error("Glossary changed elsewhere. Reload it before saving.");
+
 				return;
 			}
+
 			toast.error(failure.message);
 		} finally {
 			setSaving(false);
@@ -184,13 +248,15 @@ export function BroadcastGlossaryPanel({
 	};
 
 	const savedMappingCount = initialMappings?.length ?? 0;
+
 	const termCountLabel =
 		savedMappingCount === 0
 			? "No terms yet"
 			: `${savedMappingCount} term${savedMappingCount === 1 ? "" : "s"}`;
 
-	const triggerNode =
-		trigger === "none" ? null : trigger === "button" ? (
+	const triggerNode = Match.value(trigger).pipe(
+		Match.when("none", () => null),
+		Match.when("button", () => (
 			<DialogTrigger asChild>
 				<Button
 					variant="outline"
@@ -202,7 +268,8 @@ export function BroadcastGlossaryPanel({
 					Glossary
 				</Button>
 			</DialogTrigger>
-		) : (
+		)),
+		Match.orElse(() => (
 			<div className={cn("rounded-lg border border-border bg-card", className)}>
 				<DialogTrigger asChild>
 					<button
@@ -219,7 +286,8 @@ export function BroadcastGlossaryPanel({
 					</button>
 				</DialogTrigger>
 			</div>
-		);
+		)),
+	);
 
 	return (
 		<>

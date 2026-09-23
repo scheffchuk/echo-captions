@@ -96,8 +96,10 @@ export function BroadcastSetupHint({
 	const openSessionTools = () => {
 		if (onOpenSessionTools) {
 			onOpenSessionTools();
+
 			return;
 		}
+
 		document
 			.getElementById("viewer-link-panel")
 			?.scrollIntoView({ behavior: "smooth", block: "center" });

@@ -24,10 +24,12 @@ export function RejectedCaptureOwnerProvider({
 
 export function useRejectedCaptureOwner(): RejectedCaptureOwner {
 	const owner = useContext(RejectedCaptureOwnerContext);
+
 	if (!owner) {
 		throw new Error(
 			"useRejectedCaptureOwner must be used within RejectedCaptureOwnerProvider",
 		);
 	}
+
 	return owner;
 }

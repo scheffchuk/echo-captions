@@ -1,6 +1,5 @@
 import { ConvexError } from "convex/values";
 import { describe, expect, it, vi } from "vitest";
-import type { Id } from "@/convex/_generated/dataModel";
 import {
 	createRejectedCaptureOwner,
 	type RejectedCaptureOwner,
@@ -10,21 +9,25 @@ import {
 	type BroadcastCoordinatorAdapters,
 	createBroadcastCoordinator,
 } from "@/hooks/broadcast-coordinator";
+import { testId } from "@/test/ids";
 
 function deferred<A>() {
 	let resolve!: (value: A) => void;
-	let reject!: (error: unknown) => void;
+	let reject!: (cause: unknown) => void;
+
 	const promise = new Promise<A>((res, rej) => {
 		resolve = res;
 		reject = rej;
 	});
+
 	return { promise, resolve, reject };
 }
 
 function makeAdapters(
 	overrides: Partial<BroadcastCoordinatorAdapters> = {},
 ): BroadcastCoordinatorAdapters {
-	const broadcastId = "broadcast-1" as Id<"broadcasts">;
+	const broadcastId = testId("broadcasts", "broadcast-1");
+
 	return {
 		connect: vi.fn(async () => 3),
 		disconnect: vi.fn(async () => undefined),
@@ -67,7 +70,7 @@ function configureCoordinator(
 	adapters: BroadcastCoordinatorAdapters,
 ) {
 	coordinator.update({
-		sessionId: sessionId as Id<"sessions">,
+		sessionId: testId("sessions", sessionId),
 		recoverableBroadcastId: null,
 		adapters,
 	});
@@ -96,19 +99,23 @@ async function coordinatorWithRejectedCapture(
 	await vi.waitFor(() => {
 		expect(coordinator.snapshot().rejectedCaptures).toHaveLength(1);
 	});
+
 	return coordinator;
 }
 
 describe("Broadcast coordinator", () => {
 	it("accepts captures that arrive while Broadcast activation is pending in order", async () => {
 		const activation = deferred<BroadcastActivation>();
+
 		const acceptCommit = vi.fn<BroadcastCoordinatorAdapters["acceptCommit"]>(
 			async () => undefined,
 		);
+
 		const adapters = makeAdapters({
 			start: vi.fn(() => activation.promise),
 			acceptCommit,
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-1", adapters);
 
@@ -122,7 +129,7 @@ describe("Broadcast coordinator", () => {
 			capturedAt: 100,
 		});
 		activation.resolve({
-			broadcastId: "broadcast-1" as Id<"broadcasts">,
+			broadcastId: testId("broadcasts", "broadcast-1"),
 			sequence: 4,
 			lastCommitOrdinal: 7,
 		});
@@ -147,6 +154,7 @@ describe("Broadcast coordinator", () => {
 				.mockResolvedValueOnce(3)
 				.mockResolvedValueOnce(4),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-generations", adapters);
 
@@ -167,13 +175,16 @@ describe("Broadcast coordinator", () => {
 
 	it("drains captures delivered during disconnect before stopping the Broadcast", async () => {
 		const disconnect = deferred<void>();
+
 		const acceptCommit = vi.fn<BroadcastCoordinatorAdapters["acceptCommit"]>(
 			async () => undefined,
 		);
+
 		const adapters = makeAdapters({
 			disconnect: vi.fn(() => disconnect.promise),
 			acceptCommit,
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-disconnect", adapters);
 		await coordinator.run({ kind: "start" });
@@ -198,9 +209,11 @@ describe("Broadcast coordinator", () => {
 
 	it("retains a capture delivered after the drain boundary as rejected", async () => {
 		const stopping = deferred<{ lastCommitOrdinal: number }>();
+
 		const adapters = makeAdapters({
 			stop: vi.fn(() => stopping.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-stop-boundary", adapters);
 		await coordinator.run({ kind: "start" });
@@ -227,6 +240,7 @@ describe("Broadcast coordinator", () => {
 				}),
 			)
 			.mockResolvedValue(undefined);
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(
 			coordinator,
@@ -260,6 +274,7 @@ describe("Broadcast coordinator", () => {
 				});
 			},
 		);
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(
 			coordinator,
@@ -280,16 +295,19 @@ describe("Broadcast coordinator", () => {
 
 	it("keeps rejected captures available when the coordinator remounts for the same Session", async () => {
 		const rejectedCaptureOwner = createRejectedCaptureOwner();
+
 		const firstCoordinator = await coordinatorWithRejectedCapture(
 			rejectedCaptureOwner,
 			"session-remount",
 			"commit-remount",
 		);
+
 		firstCoordinator.dispose();
 
 		const remountedCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			remountedCoordinator,
 			"session-remount",
@@ -306,9 +324,11 @@ describe("Broadcast coordinator", () => {
 	it("keeps a remounted coordinator in sync while the disposed coordinator settles a capture", async () => {
 		const rejectedCaptureOwner = createRejectedCaptureOwner();
 		const acceptance = deferred<void>();
+
 		const firstCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			firstCoordinator,
 			"session-in-flight-remount",
@@ -323,6 +343,7 @@ describe("Broadcast coordinator", () => {
 		const remountedCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			remountedCoordinator,
 			"session-in-flight-remount",
@@ -344,10 +365,12 @@ describe("Broadcast coordinator", () => {
 		const rejectedCaptureOwner = createRejectedCaptureOwner();
 		const acceptance = deferred<void>();
 		const onError = vi.fn();
+
 		const firstCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 			onError,
 		});
+
 		configureCoordinator(
 			firstCoordinator,
 			"session-discard-in-flight",
@@ -362,6 +385,7 @@ describe("Broadcast coordinator", () => {
 		const remountedCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			remountedCoordinator,
 			"session-discard-in-flight",
@@ -388,16 +412,19 @@ describe("Broadcast coordinator", () => {
 
 	it("isolates rejected captures by Session within one owner", async () => {
 		const rejectedCaptureOwner = createRejectedCaptureOwner();
+
 		const firstSessionCoordinator = await coordinatorWithRejectedCapture(
 			rejectedCaptureOwner,
 			"session-isolated-a",
 			"commit-isolated",
 		);
+
 		firstSessionCoordinator.dispose();
 
 		const secondSessionCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			secondSessionCoordinator,
 			"session-isolated-b",
@@ -410,6 +437,7 @@ describe("Broadcast coordinator", () => {
 		const restoredSessionCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner,
 		});
+
 		configureCoordinator(
 			restoredSessionCoordinator,
 			"session-isolated-a",
@@ -432,6 +460,7 @@ describe("Broadcast coordinator", () => {
 		const secondOwnerCoordinator = createBroadcastCoordinator({
 			rejectedCaptureOwner: createRejectedCaptureOwner(),
 		});
+
 		configureCoordinator(
 			secondOwnerCoordinator,
 			"session-owner-isolation",
@@ -446,9 +475,11 @@ describe("Broadcast coordinator", () => {
 
 	it("rejects buffered captures when activation fails and disconnects realtime", async () => {
 		const activation = deferred<BroadcastActivation>();
+
 		const adapters = makeAdapters({
 			start: vi.fn(() => activation.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-activation-failure", adapters);
 
@@ -474,9 +505,11 @@ describe("Broadcast coordinator", () => {
 
 	it("stops the Broadcast on pagehide while preserving the normal stop sequence", async () => {
 		const stopping = deferred<{ lastCommitOrdinal: number }>();
+
 		const adapters = makeAdapters({
 			stop: vi.fn(() => stopping.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-pagehide", adapters);
 		await coordinator.run({ kind: "start" });
@@ -492,9 +525,11 @@ describe("Broadcast coordinator", () => {
 
 	it("does not disconnect twice when pagehide arrives during stop", async () => {
 		const disconnecting = deferred<void>();
+
 		const adapters = makeAdapters({
 			disconnect: vi.fn(() => disconnecting.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-pagehide-stop", adapters);
 		await coordinator.run({ kind: "start" });
@@ -510,9 +545,11 @@ describe("Broadcast coordinator", () => {
 
 	it("stops a partially activated Broadcast when realtime fails while draining", async () => {
 		const accepting = deferred<void>();
+
 		const adapters = makeAdapters({
 			acceptCommit: vi.fn(() => accepting.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(
 			coordinator,
@@ -553,6 +590,7 @@ describe("Broadcast coordinator", () => {
 	it("owns one heartbeat interval for an active Broadcast and reports its first failure", async () => {
 		let heartbeat!: () => void;
 		const onError = vi.fn();
+
 		const adapters = makeAdapters({
 			heartbeat: vi.fn(async () => {
 				throw new ConvexError({
@@ -561,16 +599,19 @@ describe("Broadcast coordinator", () => {
 				});
 			}),
 		});
+
 		const coordinator = createBroadcastCoordinator({
 			onError,
 			timers: {
 				setInterval: vi.fn((callback) => {
 					heartbeat = callback;
-					return 1 as unknown as ReturnType<typeof setInterval>;
+
+					return 1;
 				}),
 				clearInterval: vi.fn(),
 			},
 		});
+
 		configureCoordinator(coordinator, "session-heartbeat", adapters);
 		await coordinator.run({ kind: "start" });
 		heartbeat();
@@ -582,9 +623,11 @@ describe("Broadcast coordinator", () => {
 
 	it("rejects duplicate commands through the coordinator seam", async () => {
 		const starting = deferred<number>();
+
 		const adapters = makeAdapters({
 			connect: vi.fn(() => starting.promise),
 		});
+
 		const coordinator = createBroadcastCoordinator();
 		configureCoordinator(coordinator, "session-command-conflict", adapters);
 

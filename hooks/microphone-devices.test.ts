@@ -7,14 +7,10 @@ import {
 	classifyMicrophoneError,
 	createMicrophoneDeviceStream,
 	enumerateAudioDevices,
-	type MediaDevicesSource,
 	MicrophonePermissionDenied,
+	type MicrophoneStream,
 	requestMicrophonePermission,
 } from "@/hooks/microphone-devices";
-
-type FakeMediaStream = {
-	getTracks: () => readonly MediaStreamTrack[];
-};
 
 function device(
 	kind: MediaDeviceKind,
@@ -33,13 +29,16 @@ function device(
 function createSource(initialDevices: readonly MediaDeviceInfo[] = []) {
 	let devices = initialDevices;
 	let deviceChangeListener: (() => void) | undefined;
-	const track = { stop: vi.fn() } as unknown as MediaStreamTrack;
-	const secondTrack = { stop: vi.fn() } as unknown as MediaStreamTrack;
-	const stream: FakeMediaStream = {
+	const track = { stop: vi.fn() };
+	const secondTrack = { stop: vi.fn() };
+
+	const stream: MicrophoneStream = {
 		getTracks: () => [track, secondTrack],
 	};
+
 	const enumerateDevices = vi.fn(async () => devices);
-	const getUserMedia = vi.fn(async () => stream as MediaStream);
+	const getUserMedia = vi.fn(async () => stream);
+
 	const source = {
 		enumerateDevices,
 		getUserMedia,
@@ -57,15 +56,8 @@ function createSource(initialDevices: readonly MediaDeviceInfo[] = []) {
 		},
 		emitDeviceChange: () => deviceChangeListener?.(),
 	};
-	return source as MediaDevicesSource & {
-		readonly enumerateDevices: typeof enumerateDevices;
-		readonly getUserMedia: typeof getUserMedia;
-		readonly track: MediaStreamTrack;
-		readonly secondTrack: MediaStreamTrack;
-		readonly stream: FakeMediaStream;
-		setDevices: (next: readonly MediaDeviceInfo[]) => void;
-		emitDeviceChange: () => void;
-	};
+
+	return source;
 }
 
 afterEach(() => {
@@ -129,14 +121,14 @@ describe("microphone device effects", () => {
 	it("stops a late stream when permission acquisition is interrupted", async () => {
 		const acquisitionStarted = Effect.runSync(Deferred.make<void>());
 		const streamStopped = Effect.runSync(Deferred.make<void>());
-		let resolveStream!: (stream: MediaStream) => void;
+		let resolveStream!: (stream: MicrophoneStream) => void;
 		const source = createSource();
-		vi.mocked(source.track.stop).mockImplementation(() => {
+		source.track.stop.mockImplementation(() => {
 			Effect.runSync(Deferred.succeed(streamStopped, undefined));
 		});
 		source.getUserMedia.mockImplementationOnce(
 			() =>
-				new Promise<MediaStream>((resolve) => {
+				new Promise<MicrophoneStream>((resolve) => {
 					Effect.runSync(Deferred.succeed(acquisitionStarted, undefined));
 					resolveStream = resolve;
 				}),
@@ -145,7 +137,7 @@ describe("microphone device effects", () => {
 		const fiber = Effect.runFork(requestMicrophonePermission(source));
 		await Effect.runPromise(Deferred.await(acquisitionStarted));
 		const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
-		resolveStream(source.stream as MediaStream);
+		resolveStream(source.stream);
 		await Effect.runPromise(Deferred.await(streamStopped));
 		await interrupted;
 
@@ -156,6 +148,7 @@ describe("microphone device effects", () => {
 	it("keeps one device-change listener and releases it when the stream is interrupted", async () => {
 		const source = createSource([device("audioinput", "mic-1", "Desk Mic")]);
 		const snapshots = Effect.runSync(Queue.unbounded<readonly AudioDevice[]>());
+
 		const fiber = Effect.runFork(
 			createMicrophoneDeviceStream(source).pipe(
 				Stream.runForEach((snapshot) =>

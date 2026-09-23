@@ -16,6 +16,7 @@ export function useSessionOperatorCommits(
 	);
 
 	const commits = results.slice().reverse();
+
 	return {
 		commits,
 		feedItems: operatorCommitsToFeedItems(commits),

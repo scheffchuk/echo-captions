@@ -37,9 +37,11 @@ function item(id: string, sourceText: string): CaptionFeedItem {
 
 function getScrollContainer(container: HTMLElement): HTMLElement {
 	const node = container.querySelector(".overflow-y-auto");
+
 	if (!(node instanceof HTMLElement)) {
 		throw new Error("scroll container not found");
 	}
+
 	return node;
 }
 
@@ -56,9 +58,11 @@ function mockOverflow(
 		configurable: true,
 		get: () => metrics.clientHeight,
 	});
+
 	if (metrics.scrollTop !== undefined) {
 		el.scrollTop = metrics.scrollTop;
 	}
+
 	return {
 		setScrollHeight(next: number) {
 			scrollHeight = next;
@@ -110,15 +114,18 @@ function Harness({
 describe("CaptionFeed auto-scroll", () => {
 	it("scrolls to bottom when partialText grows while committed lines exist", async () => {
 		const user = userEvent.setup();
+
 		const view = render(
 			<Harness
 				initialItems={[item("seg-1", "Committed line")]}
 				initialPartial="partial"
 			/>,
 		);
+
 		const root = within(view.container);
 
 		const scroll = getScrollContainer(view.container);
+
 		const overflow = mockOverflow(scroll, {
 			scrollHeight: 300,
 			clientHeight: 120,
@@ -139,6 +146,7 @@ describe("CaptionFeed auto-scroll", () => {
 		const root = within(view.container);
 
 		const scroll = getScrollContainer(view.container);
+
 		const overflow = mockOverflow(scroll, {
 			scrollHeight: 250,
 			clientHeight: 120,
@@ -155,15 +163,18 @@ describe("CaptionFeed auto-scroll", () => {
 
 	it("does not auto-scroll after the user scrolls away from the bottom", async () => {
 		const user = userEvent.setup();
+
 		const view = render(
 			<Harness
 				initialItems={[item("seg-1", "Committed line")]}
 				initialPartial="partial"
 			/>,
 		);
+
 		const root = within(view.container);
 
 		const scroll = getScrollContainer(view.container);
+
 		const overflow = mockOverflow(scroll, {
 			scrollHeight: 400,
 			clientHeight: 120,
@@ -187,15 +198,18 @@ describe("CaptionFeed auto-scroll", () => {
 
 	it("jump to latest re-pins and resumes following partialText", async () => {
 		const user = userEvent.setup();
+
 		const view = render(
 			<Harness
 				initialItems={[item("seg-1", "Committed line")]}
 				initialPartial="partial"
 			/>,
 		);
+
 		const root = within(view.container);
 
 		const scroll = getScrollContainer(view.container);
+
 		const overflow = mockOverflow(scroll, {
 			scrollHeight: 400,
 			clientHeight: 120,

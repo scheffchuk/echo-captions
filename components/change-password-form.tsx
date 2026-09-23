@@ -22,14 +22,18 @@ export function ChangePasswordForm({
 
 	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
+
 		if (isSubmitting) return;
+
 		if (currentPassword.length < 8 || newPassword.length < 8) {
 			setShowValidation(true);
+
 			return;
 		}
 
 		setSubmitError(null);
 		setIsSubmitting(true);
+
 		try {
 			await onChangePassword({ currentPassword, newPassword });
 			setIsSubmitting(false);

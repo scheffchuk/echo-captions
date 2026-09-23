@@ -8,6 +8,7 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+
 function identityFor(userId: Id<"users">) {
 	return {
 		issuer: "https://auth.example",
@@ -23,6 +24,7 @@ async function seedOperator(t: ReturnType<typeof convexTest>) {
 			name: "Operator",
 		});
 	});
+
 	const otherUserId = await t.run(async (ctx) => {
 		return await ctx.db.insert("users", {
 			email: "other@echo.example",

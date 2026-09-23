@@ -31,11 +31,13 @@ export function ViewerInterface({ slug }: { slug: string }) {
 	const [userLanguagePair, setUserLanguagePair] = useState<LanguagePair | null>(
 		null,
 	);
+
 	const [textScale, setTextScale] = useState(() => getStoredTextSize());
 
 	const defaultLanguagePair = audienceKey
 		? resolveViewerLanguagePair(slug, audienceKey.split(","))
 		: null;
+
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 
 	const { feedItems, status } = useSessionCaptionFeed(session?._id);
@@ -44,6 +46,7 @@ export function ViewerInterface({ slug }: { slug: string }) {
 		languagePair !== null &&
 		languagePair.length === 2 &&
 		audienceLanguages.length >= 2;
+
 	const [lang1, lang2] = isDual
 		? languagePair
 		: [
@@ -60,6 +63,7 @@ export function ViewerInterface({ slug }: { slug: string }) {
 		setTextScale((current) => {
 			const next = Math.min(1.4, Math.max(0.8, current + delta));
 			setStoredTextSize(next);
+
 			return next;
 		});
 	};
@@ -82,6 +86,7 @@ export function ViewerInterface({ slug }: { slug: string }) {
 
 	const emptyMessage =
 		viewerState === "live" ? "Listening…" : "No captions yet";
+
 	const isLoadingFirstPage = status === "LoadingFirstPage";
 
 	const captionColumn = (code: string, options?: { bare?: boolean }) => (

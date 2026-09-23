@@ -32,10 +32,12 @@ export function mergeOperatorCommitProjections(
 	const committedIds = new Set(
 		(commits ?? []).map((commit) => commit.commitId),
 	);
+
 	const merged = [
 		...(commits ?? []),
 		...optimistic.filter((commit) => !committedIds.has(commit.commitId)),
 	];
+
 	if (
 		merged.every(
 			(commit) =>
@@ -53,6 +55,7 @@ export function mergeOperatorCommitProjections(
 						(right.commitOrdinal ?? Number.MAX_SAFE_INTEGER),
 			);
 	}
+
 	return merged;
 }
 

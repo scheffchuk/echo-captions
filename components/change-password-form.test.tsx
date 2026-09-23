@@ -61,6 +61,7 @@ describe("ChangePasswordForm", () => {
 		const onChangePassword = vi
 			.fn()
 			.mockRejectedValue(new Error("Invalid credentials"));
+
 		const user = userEvent.setup();
 		render(
 			<ChangePasswordForm
@@ -82,11 +83,13 @@ describe("ChangePasswordForm", () => {
 
 	it("prevents duplicate password changes while submission is pending", async () => {
 		let resolveChange!: () => void;
+
 		const onChangePassword = vi.fn().mockReturnValue(
 			new Promise<void>((resolve) => {
 				resolveChange = resolve;
 			}),
 		);
+
 		const onDone = vi.fn();
 		const user = userEvent.setup();
 		render(

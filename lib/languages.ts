@@ -18,6 +18,7 @@ export function matchBrowserLocale(
 	audienceLanguages: string[],
 ): string | undefined {
 	const locale = normalizeLanguageCode(navigatorLanguage);
+
 	if (!locale) return undefined;
 
 	for (const code of audienceLanguages) {

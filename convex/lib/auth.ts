@@ -25,9 +25,11 @@ export async function getCurrentOperatorId(
 	ctx: QueryCtx | MutationCtx,
 ): Promise<Id<"users"> | null> {
 	const userId = await getAuthUserId(ctx);
+
 	if (!userId) return null;
 
 	const user = await ctx.db.get("users", userId);
+
 	return user ? userId : null;
 }
 
@@ -35,9 +37,11 @@ export async function requireCurrentOperatorId(
 	ctx: QueryCtx | MutationCtx,
 ): Promise<Id<"users">> {
 	const operatorId = await getCurrentOperatorId(ctx);
+
 	if (operatorId === null) {
 		throw new NotAuthenticated({ message: "Not authenticated" });
 	}
+
 	return operatorId;
 }
 
@@ -46,8 +50,10 @@ export async function requireOperatorId(ctx: AuthCtx): Promise<Id<"users">> {
 		"db" in ctx
 			? await getCurrentOperatorId(ctx)
 			: await ctx.runQuery(internal.users.getCurrentOperator, {});
+
 	if (operatorId === null) {
 		throw new NotAuthenticated({ message: "Not authenticated" });
 	}
+
 	return operatorId;
 }

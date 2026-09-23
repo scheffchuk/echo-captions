@@ -4,6 +4,10 @@ import {
 } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { Schema } from "effect";
+import {
+	isTaggedPublicError,
+	publicErrorCode,
+} from "../shared/tagged-public-error";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
 import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
@@ -14,6 +18,7 @@ import {
 } from "./lib/sessions";
 
 const MAX_TRANSCRIPT_SEGMENTS = 1_000;
+
 const MAX_TRANSCRIPT_CHARS = 100_000;
 
 class TranscriptTooLarge extends Schema.TaggedError<TranscriptTooLarge>()(
@@ -27,30 +32,18 @@ const publicErrorCodes = {
 	TranscriptTooLarge: "transcript_too_large",
 };
 
-type TaggedPublicError = {
-	readonly _tag: string;
-	readonly message: string;
-};
-
-function isTaggedPublicError(error: unknown): error is TaggedPublicError {
-	if (typeof error !== "object" || error === null) return false;
-	const candidate = error as { _tag?: unknown; message?: unknown };
-	return (
-		typeof candidate._tag === "string" && typeof candidate.message === "string"
-	);
-}
-
 async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
 	try {
 		return await operation();
 	} catch (error) {
 		if (isTaggedPublicError(error)) {
-			const code =
-				publicErrorCodes[error._tag as keyof typeof publicErrorCodes];
+			const code = publicErrorCode(publicErrorCodes, error._tag);
+
 			if (code !== undefined) {
 				throw new ConvexError({ code, message: error.message });
 			}
 		}
+
 		throw error;
 	}
 }
@@ -69,6 +62,7 @@ const segmentValidator = v.object({
 async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({
 			message: "Session is being deleted",
@@ -82,6 +76,7 @@ async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 		)
 		.order("asc")
 		.take(MAX_TRANSCRIPT_SEGMENTS + 1);
+
 	if (segments.length > MAX_TRANSCRIPT_SEGMENTS) {
 		throw new TranscriptTooLarge({
 			message: "Transcript is too large to download",
@@ -89,6 +84,7 @@ async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	}
 
 	const transcript = segments.map((segment) => segment.sourceText).join("\n");
+
 	if (transcript.length > MAX_TRANSCRIPT_CHARS) {
 		throw new TranscriptTooLarge({
 			message: "Transcript is too large to download",
@@ -98,16 +94,21 @@ async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	return transcript;
 }
 
-const toPublicSegment = (segment: Doc<"segments">) => ({
-	_id: segment._id,
-	_creationTime: segment._creationTime,
-	sessionId: segment.sessionId,
-	sourceText: segment.sourceText,
-	sourceLanguage: segment.sourceLanguage,
-	status: segment.status,
-	translations: segment.translations,
-	...(segment.error !== undefined ? { error: segment.error } : {}),
-});
+const toPublicSegment = (segment: Doc<"segments">) => {
+	const publicSegment = {
+		_id: segment._id,
+		_creationTime: segment._creationTime,
+		sessionId: segment.sessionId,
+		sourceText: segment.sourceText,
+		sourceLanguage: segment.sourceLanguage,
+		status: segment.status,
+		translations: segment.translations,
+	};
+
+	if (segment.error === undefined) return publicSegment;
+
+	return { ...publicSegment, error: segment.error };
+};
 
 export const listBySession = query({
 	args: {
@@ -117,6 +118,7 @@ export const listBySession = query({
 	returns: paginationResultValidator(segmentValidator),
 	handler: async (ctx, args) => {
 		const session = await ctx.db.get("sessions", args.sessionId);
+
 		if (!session || session.deletionRequestedAt !== undefined) {
 			return {
 				page: [],
@@ -134,6 +136,7 @@ export const listBySession = query({
 			)
 			.order("desc")
 			.paginate(args.paginationOpts);
+
 		return { ...page, page: page.page.map(toPublicSegment) };
 	},
 });

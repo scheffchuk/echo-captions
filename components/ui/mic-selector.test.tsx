@@ -20,11 +20,13 @@ function device(deviceId: string, label: string): MediaDeviceInfo {
 function createSource(initialDevices: readonly MediaDeviceInfo[] = []) {
 	let devices = initialDevices;
 	const listeners = new Set<() => void>();
-	const track = { stop: vi.fn() } as unknown as MediaStreamTrack;
-	const secondTrack = { stop: vi.fn() } as unknown as MediaStreamTrack;
+	const track = { stop: vi.fn() };
+	const secondTrack = { stop: vi.fn() };
+
 	const stream = {
 		getTracks: () => [track, secondTrack],
-	} as unknown as MediaStream;
+	};
+
 	const source = {
 		enumerateDevices: vi.fn(async () => devices),
 		getUserMedia: vi.fn(async () => stream),
@@ -47,7 +49,8 @@ function createSource(initialDevices: readonly MediaDeviceInfo[] = []) {
 		secondTrack,
 		stream,
 	};
-	return source as MediaDevicesSource & typeof source;
+
+	return source;
 }
 
 function installMediaDevices(source: MediaDevicesSource) {
@@ -59,6 +62,7 @@ function installMediaDevices(source: MediaDevicesSource) {
 
 function DeviceState({ onError }: { onError?: (message: string) => void }) {
 	const state = useAudioDevices(onError);
+
 	return (
 		<div>
 			<div data-testid="devices">
@@ -162,8 +166,10 @@ describe("microphone selector", () => {
 	it("replaces a stale selection with the first currently available microphone", async () => {
 		const source = createSource([device("mic-1", "Desk Mic")]);
 		installMediaDevices(source);
+
 		function ControlledSelector() {
 			const [value, setValue] = useState("stale-mic");
+
 			return (
 				<>
 					<MicSelector value={value} onValueChange={setValue} />
@@ -189,10 +195,10 @@ describe("microphone selector", () => {
 	});
 
 	it("stops a late permission stream when the selector unmounts", async () => {
-		let resolveStream!: (stream: MediaStream) => void;
 		const source = createSource([device("mic-1", "Desk Mic")]);
+		let resolveStream!: (stream: typeof source.stream) => void;
 		source.getUserMedia.mockReturnValueOnce(
-			new Promise<MediaStream>((resolve) => {
+			new Promise<typeof source.stream>((resolve) => {
 				resolveStream = resolve;
 			}),
 		);

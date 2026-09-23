@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CreateEventForm } from "@/components/create-event-form";
+import { CreateEventFormView } from "@/components/create-event-form";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 if (!Element.prototype.hasPointerCapture) {
@@ -16,18 +16,9 @@ if (!Element.prototype.scrollIntoView) {
 	Element.prototype.scrollIntoView = () => {};
 }
 
-const mocks = vi.hoisted(() => ({
-	createSession: vi.fn(),
-	navigate: vi.fn(),
-}));
+const createSession = vi.fn();
 
-vi.mock("convex/react", () => ({
-	useMutation: () => mocks.createSession,
-}));
-
-vi.mock("@tanstack/react-router", () => ({
-	useNavigate: () => mocks.navigate,
-}));
+const onContinue = vi.fn();
 
 afterEach(() => {
 	cleanup();
@@ -35,17 +26,21 @@ afterEach(() => {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	mocks.createSession.mockResolvedValue({ slug: "session-123" });
+	createSession.mockResolvedValue({ slug: "session-123" });
 });
 
 async function openForm() {
 	const user = userEvent.setup();
 	render(
 		<TooltipProvider>
-			<CreateEventForm />
+			<CreateEventFormView
+				createSession={createSession}
+				onContinue={onContinue}
+			/>
 		</TooltipProvider>,
 	);
 	await user.click(screen.getByRole("button", { name: "New event" }));
+
 	return user;
 }
 
@@ -80,7 +75,7 @@ describe("CreateEventForm", () => {
 		expect(
 			screen.getByText("Add at least one spoken language"),
 		).toBeInTheDocument();
-		expect(mocks.createSession).not.toHaveBeenCalled();
+		expect(createSession).not.toHaveBeenCalled();
 	});
 
 	it("submits normalized event details, audience languages, and mappings", async () => {
@@ -95,11 +90,16 @@ describe("CreateEventForm", () => {
 			"  A reading  ",
 		);
 		await user.click(screen.getByRole("button", { name: "Event Date" }));
+
 		const dateButton = screen
 			.getAllByRole("button")
 			.find((button) => button.hasAttribute("data-day"));
-		expect(dateButton).toBeDefined();
-		await user.click(dateButton as HTMLElement);
+
+		if (!(dateButton instanceof HTMLElement)) {
+			throw new Error("Expected a date button");
+		}
+
+		await user.click(dateButton);
 		await user.click(screen.getByRole("button", { name: "Next" }));
 		await waitFor(() =>
 			expect(screen.getByText("Languages")).toBeInTheDocument(),
@@ -120,8 +120,8 @@ describe("CreateEventForm", () => {
 
 		await user.click(screen.getByRole("button", { name: "Create event" }));
 
-		await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
-		expect(mocks.createSession).toHaveBeenCalledWith({
+		await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+		expect(createSession).toHaveBeenCalledWith({
 			title: "The Night Library",
 			description: "A reading",
 			eventDate: expect.any(Number),
@@ -150,7 +150,7 @@ describe("CreateEventForm", () => {
 		expect(
 			screen.getByText("Complete this mapping or remove the row."),
 		).toBeInTheDocument();
-		expect(mocks.createSession).not.toHaveBeenCalled();
+		expect(createSession).not.toHaveBeenCalled();
 	});
 
 	it("preserves the untitled fallback for a whitespace-only event name", async () => {
@@ -162,14 +162,14 @@ describe("CreateEventForm", () => {
 		);
 		await user.click(screen.getByRole("button", { name: "Create event" }));
 
-		await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
-		expect(mocks.createSession).toHaveBeenCalledWith(
+		await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+		expect(createSession).toHaveBeenCalledWith(
 			expect.objectContaining({ title: "Untitled" }),
 		);
 	});
 
 	it("keeps the entered values visible after a server rejection", async () => {
-		mocks.createSession.mockRejectedValueOnce(
+		createSession.mockRejectedValueOnce(
 			new ConvexError("Slug service unavailable"),
 		);
 		const user = await openForm();
@@ -188,7 +188,7 @@ describe("CreateEventForm", () => {
 
 	it("uses form submission state to ignore a duplicate create action", async () => {
 		let resolveCreate!: (value: { slug: string }) => void;
-		mocks.createSession.mockReturnValueOnce(
+		createSession.mockReturnValueOnce(
 			new Promise((resolve) => {
 				resolveCreate = resolve;
 			}),
@@ -201,7 +201,7 @@ describe("CreateEventForm", () => {
 		await waitFor(() => expect(createButton).toBeDisabled());
 		await user.click(createButton);
 
-		expect(mocks.createSession).toHaveBeenCalledTimes(1);
+		expect(createSession).toHaveBeenCalledTimes(1);
 		resolveCreate({ slug: "session-123" });
 	});
 
@@ -224,7 +224,7 @@ describe("CreateEventForm", () => {
 		await user.click(screen.getByRole("button", { name: "Create event" }));
 		await user.click(screen.getByRole("button", { name: "Go to broadcast" }));
 
-		expect(mocks.navigate).toHaveBeenCalledWith({
+		expect(onContinue).toHaveBeenCalledWith({
 			to: "/broadcast/$slug",
 			params: { slug: "session-123" },
 		});

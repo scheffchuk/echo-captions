@@ -6,7 +6,9 @@ import {
 } from "@/lib/languages";
 
 const LANGUAGE_PAIR_PREFIX = "echo-viewer-langs:";
+
 const TEXT_SIZE_KEY = "echo-viewer-text-size";
+
 const languagePairSchema = Schema.fromJsonString(
 	Schema.Union([
 		Schema.Tuple([Schema.NonEmptyString]),
@@ -17,6 +19,7 @@ const languagePairSchema = Schema.fromJsonString(
 		),
 	]),
 );
+
 const textSizeSchema = Schema.FiniteFromString.check(
 	Schema.isBetween({ minimum: 0.8, maximum: 1.4 }),
 );
@@ -30,14 +33,19 @@ export function getStoredLanguagePair(slug: string): LanguagePair | null {
 	if (typeof window === "undefined") return null;
 	const key = `${LANGUAGE_PAIR_PREFIX}${slug}`;
 	const stored = localStorage.getItem(key);
+
 	if (stored === null) return null;
+
 	const decoded = Option.getOrUndefined(
 		Schema.decodeUnknownOption(languagePairSchema)(stored),
 	);
+
 	if (decoded) {
 		return decoded.length === 1 ? [decoded[0]] : [decoded[0], decoded[1]];
 	}
+
 	localStorage.removeItem(key);
+
 	return null;
 }
 
@@ -52,6 +60,7 @@ function pickStoredPair(
 	if (stored.length === 1 && audienceLanguages.includes(stored[0])) {
 		return stored;
 	}
+
 	if (
 		stored.length === 2 &&
 		audienceLanguages.includes(stored[0]) &&
@@ -60,6 +69,7 @@ function pickStoredPair(
 	) {
 		return stored;
 	}
+
 	return null;
 }
 
@@ -69,8 +79,10 @@ export function resolveViewerLanguagePair(
 	audienceLanguages: string[],
 ): LanguagePair {
 	const stored = getStoredLanguagePair(slug);
+
 	if (stored) {
 		const valid = pickStoredPair(stored, audienceLanguages);
+
 		if (valid) return valid;
 		removeStoredLanguagePair(slug);
 	}
@@ -84,8 +96,10 @@ export function resolveLanguagePair(
 	audienceLanguages: string[],
 ): LanguagePair {
 	const stored = getStoredLanguagePair(slug);
+
 	if (stored) {
 		const valid = pickStoredPair(stored, audienceLanguages);
+
 		if (valid) return valid;
 		removeStoredLanguagePair(slug);
 	}
@@ -96,12 +110,16 @@ export function resolveLanguagePair(
 export function getStoredTextSize(): number {
 	if (typeof window === "undefined") return 1;
 	const stored = localStorage.getItem(TEXT_SIZE_KEY);
+
 	if (stored === null) return 1;
+
 	const decoded = Option.getOrUndefined(
 		Schema.decodeUnknownOption(textSizeSchema)(stored),
 	);
+
 	if (decoded !== undefined) return decoded;
 	localStorage.removeItem(TEXT_SIZE_KEY);
+
 	return 1;
 }
 

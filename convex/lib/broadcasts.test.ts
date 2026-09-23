@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { Id } from "../_generated/dataModel";
+import { testId } from "@/test/ids";
 import {
 	BROADCAST_HEARTBEAT_TIMEOUT_MS,
 	type BroadcastLifecycleState,
@@ -117,7 +117,7 @@ describe("broadcast lifecycle policy", () => {
 describe("broadcast projections", () => {
 	test("exposes unresolved state to owners but only active state publicly", () => {
 		const lost = {
-			_id: "broadcast-id" as Id<"broadcasts">,
+			_id: testId("broadcasts", "broadcast-id"),
 			sequence: 2,
 			status: "lost" as const,
 			lastCommitOrdinal: 3,

@@ -8,9 +8,11 @@ export function getConvexUrl() {
 
 	try {
 		const url = new URL(rawUrl);
+
 		if (url.protocol !== "http:" && url.protocol !== "https:") {
 			throw new Error("Unsupported protocol");
 		}
+
 		return url.toString().replace(/\/$/, "");
 	} catch {
 		throw new Error("VITE_CONVEX_URL must be a valid HTTP(S) URL");

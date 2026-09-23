@@ -47,6 +47,7 @@ export const broadcastErrorCodes = {
 } as const;
 
 export const BROADCAST_HEARTBEAT_INTERVAL_MS = 5_000;
+
 export const BROADCAST_HEARTBEAT_TIMEOUT_MS = 20_000;
 
 export const unresolvedBroadcastStatuses = [
@@ -95,18 +96,22 @@ function broadcastStateError(state: BroadcastLifecycleState) {
 
 	const hasFinalCommitOrdinal = state.finalCommitOrdinal !== undefined;
 	const isFinalized = state.status === "stopping" || state.status === "sealed";
+
 	if (hasFinalCommitOrdinal !== isFinalized) {
 		return "Broadcast final commit ordinal does not match its status";
 	}
+
 	if (
 		hasFinalCommitOrdinal &&
 		state.finalCommitOrdinal !== state.lastCommitOrdinal
 	) {
 		return "Broadcast final commit ordinal does not match its last commit ordinal";
 	}
+
 	if (state.status === "sealed" && state.pendingCommitCount !== 0) {
 		return "Sealed Broadcast still has pending commits";
 	}
+
 	return null;
 }
 
@@ -120,17 +125,22 @@ export function classifyBroadcastTransition(
 
 	if (transition.kind === "resume") {
 		if (state.status === "active") return { kind: "noop" };
+
 		if (state.status === "lost") return { kind: "resume" };
+
 		return { kind: "invalid", reason: "not_lost" };
 	}
 
 	if (transition.kind === "heartbeatExpired") {
 		if (state.status !== "active") return { kind: "noop" };
+
 		if (state.lastHeartbeatAt === undefined) {
 			return { kind: "invalid", reason: "invalid_state" };
 		}
+
 		const delayMs =
 			BROADCAST_HEARTBEAT_TIMEOUT_MS - (transition.now - state.lastHeartbeatAt);
+
 		return delayMs > 0 ? { kind: "reschedule", delayMs } : { kind: "markLost" };
 	}
 
@@ -143,10 +153,13 @@ export function classifyBroadcastTransition(
 	}
 
 	if (state.status === "sealed") return { kind: "noop" };
+
 	if (transition.kind === "abandon" && state.status !== "lost") {
 		return { kind: "invalid", reason: "not_lost" };
 	}
+
 	if (state.status === "stopping") return { kind: "checkDrain" };
+
 	if (transition.kind === "stop" && state.status === "lost") {
 		return { kind: "invalid", reason: "not_active" };
 	}
@@ -187,6 +200,7 @@ export function projectBroadcast(
 			: audience === "public" && broadcast?.status === "active"
 				? broadcast
 				: null;
+
 	return {
 		isLive: visibleBroadcast?.status === "active",
 		activeBroadcast: visibleBroadcast
@@ -199,9 +213,11 @@ export function assertValidBroadcastState(
 	broadcast: Doc<"broadcasts">,
 ): Doc<"broadcasts"> {
 	const error = broadcastStateError(broadcast);
+
 	if (error !== null) {
 		throw new Error(error);
 	}
+
 	return broadcast;
 }
 
@@ -210,6 +226,7 @@ async function readUnresolvedBroadcast(
 	sessionId: Id<"sessions">,
 ): Promise<Doc<"broadcasts"> | null> {
 	let unresolved: Doc<"broadcasts"> | null = null;
+
 	for (const status of unresolvedBroadcastStatuses) {
 		const broadcasts = await ctx.db
 			.query("broadcasts")
@@ -217,18 +234,22 @@ async function readUnresolvedBroadcast(
 				q.eq("sessionId", sessionId).eq("status", status),
 			)
 			.take(2);
+
 		if (broadcasts.length > 1) {
 			throw new Error(
 				"Session has multiple Broadcasts in one unresolved state",
 			);
 		}
+
 		if (broadcasts[0]) {
 			if (unresolved) {
 				throw new Error("Session has multiple unresolved Broadcasts");
 			}
+
 			unresolved = assertValidBroadcastState(broadcasts[0]);
 		}
 	}
+
 	return unresolved;
 }
 
@@ -238,6 +259,7 @@ export async function readBroadcastProjection(
 	audience: BroadcastProjectionAudience,
 ) {
 	const unresolved = await readUnresolvedBroadcast(ctx, sessionId);
+
 	return projectBroadcast(unresolved, audience);
 }
 
@@ -247,17 +269,21 @@ async function getOwnedBroadcast(
 	ownerId: Id<"users">,
 ) {
 	const broadcast = await ctx.db.get("broadcasts", broadcastId);
+
 	if (!broadcast) {
 		throw new BroadcastNotFound({ message: "Broadcast not found" });
 	}
 
 	const session = await ctx.db.get("sessions", broadcast.sessionId);
+
 	if (!session) {
 		throw new SessionNotFound({ message: "Session not found" });
 	}
+
 	if (session.ownerId !== ownerId) {
 		throw new Unauthorized({ message: "Unauthorized" });
 	}
+
 	return assertValidBroadcastState(broadcast);
 }
 
@@ -274,6 +300,7 @@ export async function getBroadcastProjection(
 	audience: BroadcastProjectionAudience,
 ) {
 	const broadcast = await getUnresolvedBroadcast(ctx, sessionId);
+
 	return projectBroadcast(broadcast, audience);
 }
 
@@ -295,7 +322,9 @@ export async function maybeSealBroadcast(
 	broadcastId: Id<"broadcasts">,
 ) {
 	const broadcast = await ctx.db.get("broadcasts", broadcastId);
+
 	if (broadcast) assertValidBroadcastState(broadcast);
+
 	if (
 		broadcast?.status !== "stopping" ||
 		broadcast.finalCommitOrdinal === undefined
@@ -309,6 +338,7 @@ export async function maybeSealBroadcast(
 
 	const sealedAt = Date.now();
 	await ctx.db.patch(broadcastId, { status: "sealed", sealedAt });
+
 	return await ctx.db.get("broadcasts", broadcastId);
 }
 
@@ -317,16 +347,21 @@ export async function finishCommitDrain(
 	broadcastId: Id<"broadcasts">,
 ) {
 	const broadcast = await ctx.db.get("broadcasts", broadcastId);
+
 	if (!broadcast) {
 		throw new Error("Accepted commit references a missing Broadcast");
 	}
+
 	assertValidBroadcastState(broadcast);
+
 	if (broadcast.pendingCommitCount <= 0) {
 		throw new Error("Broadcast pending commit count underflow");
 	}
+
 	await ctx.db.patch(broadcastId, {
 		pendingCommitCount: broadcast.pendingCommitCount - 1,
 	});
+
 	return await maybeSealBroadcast(ctx, broadcastId);
 }
 
@@ -361,11 +396,13 @@ function transitionError(
 			message: "Final commit ordinal conflicts with the Broadcast state",
 		});
 	}
+
 	if (reason === "not_active") {
 		return new BroadcastNotActive({
 			message: "Resume or abandon the Lost Broadcast before stopping it",
 		});
 	}
+
 	return new BroadcastNotLost({
 		message: notLostMessage,
 	});
@@ -377,11 +414,13 @@ export async function startBroadcast(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
 
 	const unresolved = await getUnresolvedBroadcast(ctx, sessionId);
+
 	if (unresolved) {
 		throw new SessionBusy({
 			message: "The Session already has an unresolved Broadcast",
@@ -390,6 +429,7 @@ export async function startBroadcast(
 
 	const sequence = session.lastBroadcastSequence + 1;
 	const startedAt = Date.now();
+
 	const broadcastId = await ctx.db.insert("broadcasts", {
 		sessionId,
 		sequence,
@@ -399,6 +439,7 @@ export async function startBroadcast(
 		lastCommitOrdinal: 0,
 		pendingCommitCount: 0,
 	});
+
 	await ctx.db.patch(sessionId, {
 		lastBroadcastSequence: sequence,
 		lastActivityAt: startedAt,
@@ -423,21 +464,28 @@ export async function sendHeartbeat(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const broadcast = await getOwnedBroadcast(ctx, broadcastId, ownerId);
+
 	if (broadcast.status !== "active") return null;
 	const lastHeartbeatAt = Date.now();
+
 	const decision = classifyBroadcastTransition(
 		{ ...broadcast, lastHeartbeatAt: broadcast.lastHeartbeatAt },
 		{ kind: "heartbeatExpired", now: lastHeartbeatAt },
 	);
+
 	if (decision.kind === "markLost") {
 		await ctx.db.patch(broadcastId, { status: "lost" });
+
 		return null;
 	}
+
 	if (decision.kind === "invalid") {
 		throw new Error("Invalid Broadcast lifecycle state");
 	}
+
 	if (decision.kind !== "reschedule") return null;
 	await ctx.db.patch(broadcastId, { lastHeartbeatAt });
+
 	return null;
 }
 
@@ -446,27 +494,34 @@ export async function markBroadcastLost(
 	args: HeartbeatExpiryArgs,
 ) {
 	const broadcast = await ctx.db.get("broadcasts", args.broadcastId);
+
 	if (!broadcast) return null;
 
 	const now = Date.now();
+
 	const decision = classifyBroadcastTransition(
 		{ ...broadcast, lastHeartbeatAt: broadcast.lastHeartbeatAt },
 		{ kind: "heartbeatExpired", now },
 	);
+
 	if (decision.kind === "reschedule") {
 		await scheduleHeartbeatExpiry(
 			ctx,
 			{ broadcastId: args.broadcastId },
 			decision.delayMs,
 		);
+
 		return null;
 	}
+
 	if (decision.kind === "invalid") {
 		throw new Error("Invalid Broadcast lifecycle state");
 	}
+
 	if (decision.kind !== "markLost") return null;
 
 	await ctx.db.patch(args.broadcastId, { status: "lost" });
+
 	return null;
 }
 
@@ -477,21 +532,26 @@ export async function resumeBroadcast(
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const broadcast = await getOwnedBroadcast(ctx, broadcastId, ownerId);
 	const decision = classifyBroadcastTransition(broadcast, { kind: "resume" });
+
 	if (decision.kind === "invalid") {
 		if (decision.reason === "invalid_state") {
 			throw new Error("Invalid Broadcast lifecycle state");
 		}
+
 		throw transitionError(
 			decision.reason,
 			"Only a Lost Broadcast can be resumed",
 		);
 	}
+
 	if (decision.kind === "noop") return toBroadcastResult(broadcast);
 
 	const session = await getOwnedSession(ctx, broadcast.sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	const lastHeartbeatAt = Date.now();
 	await ctx.db.patch(broadcastId, {
 		status: "active",
@@ -502,6 +562,7 @@ export async function resumeBroadcast(
 		{ broadcastId },
 		BROADCAST_HEARTBEAT_TIMEOUT_MS,
 	);
+
 	return toBroadcastResult({
 		_id: broadcast._id,
 		sequence: broadcast.sequence,
@@ -527,24 +588,30 @@ async function terminalBroadcastTransition(
 ) {
 	const ownerId = await requireCurrentOperatorId(ctx);
 	const broadcast = await getOwnedBroadcast(ctx, args.broadcastId, ownerId);
+
 	const finalCommitOrdinal =
 		args.kind === "stop" && args.finalCommitOrdinal !== undefined
 			? validateFinalCommitOrdinal(args.finalCommitOrdinal)
 			: broadcast.lastCommitOrdinal;
+
 	const decision = classifyBroadcastTransition(broadcast, {
 		kind: args.kind,
 		finalCommitOrdinal,
 	});
 
 	if (decision.kind === "noop") return toBroadcastResult(broadcast);
+
 	if (decision.kind === "checkDrain") {
 		const sealed = await maybeSealBroadcast(ctx, args.broadcastId);
+
 		return toBroadcastResult(sealed ?? broadcast);
 	}
+
 	if (decision.kind === "invalid") {
 		if (decision.reason === "invalid_state") {
 			throw new Error("Invalid Broadcast lifecycle state");
 		}
+
 		throw transitionError(
 			decision.reason,
 			args.kind === "abandon"
@@ -552,15 +619,19 @@ async function terminalBroadcastTransition(
 				: undefined,
 		);
 	}
+
 	if (decision.kind !== "transition") {
 		throw new Error("Invalid Broadcast transition decision");
 	}
 
 	const session = await getOwnedSession(ctx, broadcast.sessionId, ownerId);
+
 	if (session.deletionRequestedAt !== undefined) {
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
+
 	const stoppedAt = Date.now();
+
 	const patch =
 		decision.status === "sealed"
 			? {
@@ -572,8 +643,10 @@ async function terminalBroadcastTransition(
 					status: decision.status,
 					finalCommitOrdinal: decision.finalCommitOrdinal,
 				};
+
 	await ctx.db.patch(args.broadcastId, patch);
 	await ctx.db.patch(broadcast.sessionId, { lastActivityAt: stoppedAt });
+
 	return toBroadcastResult({ ...broadcast, ...patch });
 }
 
@@ -609,6 +682,7 @@ export function toBroadcastResult(
 	if (!broadcast) {
 		throw new Error("Broadcast disappeared during lifecycle transition");
 	}
+
 	return {
 		broadcastId: broadcast._id,
 		sequence: broadcast.sequence,
@@ -618,7 +692,7 @@ export function toBroadcastResult(
 	};
 }
 
-export function validateCommitOrdinal(value: unknown) {
+export function validateCommitOrdinal(value: number) {
 	try {
 		return Schema.decodeUnknownSync(positiveCommitOrdinalSchema)(value);
 	} catch {
@@ -628,7 +702,7 @@ export function validateCommitOrdinal(value: unknown) {
 	}
 }
 
-export function validateFinalCommitOrdinal(value: unknown) {
+export function validateFinalCommitOrdinal(value: number) {
 	try {
 		return Schema.decodeUnknownSync(Schema.Natural)(value);
 	} catch {

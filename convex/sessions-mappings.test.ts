@@ -13,6 +13,7 @@ const modules = import.meta.glob("./**/*.ts");
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+
 	return t;
 }
 
@@ -33,6 +34,7 @@ async function seedOperator(t: MappingTest) {
 			name: "Operator",
 		});
 	});
+
 	return t.withIdentity(identityFor(operatorId));
 }
 
@@ -40,6 +42,7 @@ describe("versioned translation mappings", () => {
 	it("stores canonical revisions and treats equivalent saves as no-ops", async () => {
 		const t = makeTest();
 		const operator = await seedOperator(t);
+
 		const created = await operator.mutation(api.sessions.create, {
 			title: "Mapping event",
 			spokenLanguages: ["en"],
@@ -52,16 +55,20 @@ describe("versioned translation mappings", () => {
 				},
 			],
 		});
+
 		const first = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		if (!first) throw new Error("Expected created Session");
 		const firstRevisionId = first.translationMappingRevisionId;
+
 		if (!firstRevisionId) throw new Error("Expected a mapping revision");
 
 		expect(first.translationMappings).toEqual([
 			{ term: "café", targetLanguage: "ja", translation: "カフェ" },
 		]);
+
 		const equivalent = await operator.mutation(
 			api.sessions.updateTranslationMappings,
 			{
@@ -72,6 +79,7 @@ describe("versioned translation mappings", () => {
 				],
 			},
 		);
+
 		expect(equivalent).toEqual({
 			revisionId: firstRevisionId,
 			changed: false,
@@ -81,6 +89,7 @@ describe("versioned translation mappings", () => {
 			internal.mappingRevisions.getForAction,
 			{ revisionId: firstRevisionId },
 		);
+
 		expect(revision).toMatchObject({
 			revision: 1,
 			mappings: first.translationMappings,
@@ -90,14 +99,17 @@ describe("versioned translation mappings", () => {
 	it("rejects stale saves, preserves empty-revision semantics, and creates no empty revision", async () => {
 		const t = makeTest();
 		const operator = await seedOperator(t);
+
 		const created = await operator.mutation(api.sessions.create, {
 			title: "Conflict event",
 			spokenLanguages: ["en"],
 			audienceLanguagesExtra: ["ja"],
 		});
+
 		const session = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		if (!session) throw new Error("Expected created Session");
 
 		const firstSave = await operator.mutation(
@@ -110,14 +122,17 @@ describe("versioned translation mappings", () => {
 				],
 			},
 		);
+
 		if (!firstSave.revisionId) throw new Error("Expected first revision");
+
 		const staleError = await operator
 			.mutation(api.sessions.updateTranslationMappings, {
 				sessionId: session._id,
 				expectedRevisionId: null,
 				translationMappings: [],
 			})
-			.catch((error: unknown) => error);
+			.catch((cause: unknown) => cause);
+
 		expect(staleError).toMatchObject({
 			data: { code: "mapping_revision_conflict" },
 		});
@@ -130,6 +145,7 @@ describe("versioned translation mappings", () => {
 				translationMappings: [],
 			},
 		);
+
 		expect(cleared).toEqual({ revisionId: null, changed: true });
 		expect(
 			await operator.mutation(api.sessions.updateTranslationMappings, {
@@ -147,12 +163,14 @@ describe("versioned translation mappings", () => {
 				)
 				.take(2),
 		);
+
 		expect(revisions).toHaveLength(1);
 	});
 
 	it("keeps the revision when adding a language and drops mappings removed from the audience", async () => {
 		const t = makeTest();
 		const operator = await seedOperator(t);
+
 		const created = await operator.mutation(api.sessions.create, {
 			title: "Language event",
 			spokenLanguages: ["en"],
@@ -161,12 +179,15 @@ describe("versioned translation mappings", () => {
 				{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 			],
 		});
+
 		const session = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		if (!session?.translationMappingRevisionId) {
 			throw new Error("Expected mapping revision");
 		}
+
 		const revisionId = session.translationMappingRevisionId;
 
 		await operator.mutation(api.sessions.updateLanguages, {
@@ -174,9 +195,11 @@ describe("versioned translation mappings", () => {
 			spokenLanguages: ["en"],
 			audienceLanguagesExtra: ["ja", "de"],
 		});
+
 		const withAddedLanguage = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		expect(withAddedLanguage?.translationMappingRevisionId).toBe(revisionId);
 
 		await operator.mutation(api.sessions.updateLanguages, {
@@ -184,12 +207,14 @@ describe("versioned translation mappings", () => {
 			spokenLanguages: ["en"],
 			audienceLanguagesExtra: [],
 		});
+
 		const withRemovedLanguage = await operator.query(
 			api.sessions.getMineBySlug,
 			{
 				slug: created.slug,
 			},
 		);
+
 		expect(withRemovedLanguage?.translationMappingRevisionId).toBeUndefined();
 		expect(withRemovedLanguage?.translationMappings).toEqual([]);
 	});
@@ -197,6 +222,7 @@ describe("versioned translation mappings", () => {
 	it("captures the current revision when each commit is accepted", async () => {
 		const t = makeTest();
 		const operator = await seedOperator(t);
+
 		const created = await operator.mutation(api.sessions.create, {
 			title: "Live mapping event",
 			spokenLanguages: ["en"],
@@ -205,15 +231,19 @@ describe("versioned translation mappings", () => {
 				{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 			],
 		});
+
 		const session = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		if (!session?.translationMappingRevisionId) {
 			throw new Error("Expected mapping revision");
 		}
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId: session._id,
 		});
+
 		const firstCommit = await operator.mutation(api.captions.acceptCommit, {
 			sessionId: session._id,
 			broadcastId: started.broadcastId,
@@ -233,7 +263,9 @@ describe("versioned translation mappings", () => {
 				],
 			},
 		);
+
 		if (!updated.revisionId) throw new Error("Expected updated revision");
+
 		const secondCommit = await operator.mutation(api.captions.acceptCommit, {
 			sessionId: session._id,
 			broadcastId: started.broadcastId,
@@ -242,6 +274,7 @@ describe("versioned translation mappings", () => {
 			sourceText: "Echo two",
 			sourceLanguage: "en",
 		});
+
 		const snapshots = await t.run(async (ctx) => ({
 			first: await ctx.db.get("acceptedCommits", firstCommit.acceptedCommitId),
 			second: await ctx.db.get(

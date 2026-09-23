@@ -78,7 +78,7 @@ const retrySchedule = Schedule.max([
 ]).pipe(
 	Schedule.jittered,
 	Schedule.setInputType<ScribeRequestError>(),
-	Schedule.while(({ input }) => input._tag === "ScribeTransientError"),
+	Schedule.while(({ input }) => input instanceof ScribeTransientError),
 );
 
 export class Scribe extends Context.Service<
@@ -94,6 +94,7 @@ export class Scribe extends Context.Service<
 		Scribe,
 		Effect.gen(function* () {
 			const client = yield* HttpClient.HttpClient;
+
 			const apiKey = yield* Config.redacted("ELEVENLABS_API_KEY").pipe(
 				Effect.mapError(
 					() =>
@@ -103,6 +104,7 @@ export class Scribe extends Context.Service<
 						}),
 				),
 			);
+
 			if (!Redacted.value(apiKey).trim()) {
 				return yield* new ScribeConfigError({
 					operation: "Scribe.config",
@@ -116,13 +118,15 @@ export class Scribe extends Context.Service<
 				).pipe(
 					HttpClientRequest.setHeader("xi-api-key", Redacted.value(apiKey)),
 					client.execute,
-					Effect.catch((cause) =>
-						cause.reason._tag === "TransportError"
-							? new ScribeTransientError({
-									operation: "Scribe.createToken",
-									message: "Scribe token service is unavailable",
-								})
-							: Effect.die(cause),
+					Effect.catchReason(
+						"HttpClientError",
+						"TransportError",
+						() =>
+							new ScribeTransientError({
+								operation: "Scribe.createToken",
+								message: "Scribe token service is unavailable",
+							}),
+						(_reason, error) => Effect.die(error),
 					),
 				);
 
@@ -132,6 +136,7 @@ export class Scribe extends Context.Service<
 						message: "Scribe token service is unavailable",
 					});
 				}
+
 				if (response.status < 200 || response.status >= 300) {
 					return yield* new ScribeRejectedError({
 						operation: "Scribe.createToken",
@@ -140,26 +145,27 @@ export class Scribe extends Context.Service<
 					});
 				}
 
+				const malformedToken = new ScribeResponseError({
+					operation: "Scribe.createToken",
+					message: "Scribe returned a malformed token response",
+				});
+
 				const data = yield* HttpClientResponse.schemaBodyJson(
 					ScribeTokenResponse,
 				)(response).pipe(
-					Effect.catch((cause) => {
-						if (Schema.isSchemaError(cause)) {
-							return new ScribeResponseError({
-								operation: "Scribe.createToken",
-								message: "Scribe returned a malformed token response",
-							});
-						}
-						return cause.reason._tag === "DecodeError" ||
-							cause.reason._tag === "EmptyBodyError"
-							? new ScribeResponseError({
-									operation: "Scribe.createToken",
-									message: "Scribe returned a malformed token response",
-								})
-							: Effect.die(cause);
-					}),
+					Effect.catchTag("SchemaError", () => malformedToken),
+					Effect.catchReasons(
+						"HttpClientError",
+						{
+							DecodeError: () => malformedToken,
+							EmptyBodyError: () => malformedToken,
+						},
+						(_reason, error) => Effect.die(error),
+					),
 				);
+
 				const token = data.token.trim();
+
 				if (!token) {
 					return yield* new ScribeResponseError({
 						operation: "Scribe.createToken",

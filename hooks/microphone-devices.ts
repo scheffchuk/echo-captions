@@ -6,9 +6,15 @@ export type AudioDevice = Readonly<{
 	groupId: string;
 }>;
 
+export type MicrophoneStream = {
+	getTracks: () => ReadonlyArray<{ stop: () => void }>;
+};
+
 export type MediaDevicesSource = Readonly<{
 	enumerateDevices: () => Promise<readonly MediaDeviceInfo[]>;
-	getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
+	getUserMedia: (
+		constraints: MediaStreamConstraints,
+	) => Promise<MicrophoneStream>;
 	addEventListener: (type: "devicechange", listener: () => void) => void;
 	removeEventListener: (type: "devicechange", listener: () => void) => void;
 }>;
@@ -59,29 +65,35 @@ export type MicrophoneDeviceSnapshot =
 
 const permissionDeniedMessage =
 	"Microphone permission was denied. Turn on microphone access in your browser's site settings and try again.";
+
 const unsupportedMessage =
 	"This browser cannot access microphones. Use a secure, supported browser.";
+
 const unavailableMessage =
 	"The microphone is unavailable. Connect a microphone or close other apps using it, then try again.";
+
 const interruptedMessage = "Microphone access was interrupted. Try again.";
 
-function browserErrorName(error: unknown): string | undefined {
-	if (typeof DOMException === "function") {
+function browserErrorName(cause: unknown): string | undefined {
+	if (globalThis.DOMException !== undefined) {
 		const browserException = Schema.decodeUnknownOption(
-			Schema.instanceOf(DOMException),
-		)(error);
+			Schema.instanceOf(globalThis.DOMException),
+		)(cause);
+
 		const exception = Option.getOrUndefined(browserException);
+
 		if (exception) return exception.name;
 	}
 
 	const browserError = Schema.decodeUnknownOption(
 		Schema.Struct({ name: Schema.String }),
-	)(error);
+	)(cause);
+
 	return Option.getOrUndefined(Option.map(browserError, ({ name }) => name));
 }
 
-export function classifyMicrophoneError(error: unknown): MicrophoneError {
-	switch (browserErrorName(error)) {
+export function classifyMicrophoneError(cause: unknown): MicrophoneError {
+	switch (browserErrorName(cause)) {
 		case "NotAllowedError":
 		case "SecurityError":
 			return new MicrophonePermissionDenied({
@@ -98,12 +110,13 @@ export function classifyMicrophoneError(error: unknown): MicrophoneError {
 		case "TypeError":
 			return new MicrophoneUnsupported({ message: unsupportedMessage });
 		default:
-			throw error;
+			throw cause;
 	}
 }
 
 function cleanDeviceLabel(device: MediaDeviceInfo) {
 	const label = device.label || `Microphone ${device.deviceId.slice(0, 8)}`;
+
 	return label.replace(/\s*\([^)]*\)/g, "").trim();
 }
 
@@ -114,6 +127,7 @@ export function toAudioDevices(
 		if (device.kind !== "audioinput" || device.deviceId.length === 0) {
 			return [];
 		}
+
 		return [
 			{
 				deviceId: device.deviceId,
@@ -133,9 +147,10 @@ export const enumerateAudioDevices = Effect.fn(
 	}).pipe(Effect.map(toAudioDevices)),
 );
 
-function stopMediaStream(stream: Pick<MediaStream, "getTracks">) {
+function stopMediaStream(stream: MicrophoneStream) {
 	let stoppedWithError = false;
 	let firstError: unknown;
+
 	for (const track of stream.getTracks()) {
 		try {
 			track.stop();
@@ -146,6 +161,7 @@ function stopMediaStream(stream: Pick<MediaStream, "getTracks">) {
 			}
 		}
 	}
+
 	if (stoppedWithError) throw firstError;
 }
 
@@ -154,19 +170,24 @@ const acquirePermissionStream = Effect.fn("microphone.acquirePermissionStream")(
 		const acquire = Effect.tryPromise({
 			try: (signal) => {
 				let interrupted = signal.aborted;
+
 				const onAbort = () => {
 					interrupted = true;
 				};
+
 				signal.addEventListener("abort", onAbort, { once: true });
 
 				return source.getUserMedia({ audio: true }).then(
 					(stream) => {
 						signal.removeEventListener("abort", onAbort);
+
 						if (interrupted || signal.aborted) stopMediaStream(stream);
+
 						return stream;
 					},
 					(error) => {
 						signal.removeEventListener("abort", onAbort);
+
 						return Promise.reject(error);
 					},
 				);
@@ -186,6 +207,7 @@ export const requestMicrophonePermission = Effect.fn(
 	Effect.scoped(
 		Effect.gen(function* () {
 			yield* acquirePermissionStream(source);
+
 			return yield* enumerateAudioDevices(source);
 		}),
 	),
@@ -196,9 +218,11 @@ export function createMicrophoneDeviceStream(
 ): Stream.Stream<MicrophoneDeviceSnapshot> {
 	return Stream.callback<void>((queue) => {
 		const listener = () => Queue.offerUnsafe(queue, undefined);
+
 		return Effect.acquireRelease(
 			Effect.sync(() => {
 				source.addEventListener("devicechange", listener);
+
 				return listener;
 			}),
 			(registeredListener) =>
@@ -232,6 +256,7 @@ export function getBrowserMediaDevices(): MediaDevicesSource | undefined {
 	}
 
 	const mediaDevices = navigator.mediaDevices;
+
 	return {
 		enumerateDevices: () => mediaDevices.enumerateDevices(),
 		getUserMedia: (constraints) => mediaDevices.getUserMedia(constraints),

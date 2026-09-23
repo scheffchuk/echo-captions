@@ -11,9 +11,10 @@ import {
 	createBroadcastCoordinator,
 } from "@/hooks/broadcast-coordinator";
 import { useRejectedCaptureOwner } from "@/hooks/rejected-capture-owner";
-import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
+import { useLiveRealtimeConnection } from "@/hooks/use-realtime-connection";
 
 export type BroadcastVoiceState = "idle" | "connecting" | "recording";
+
 export type { BroadcastLifecycleStatus } from "@/hooks/broadcast-coordinator";
 
 const emptyCoordinatorSnapshot: BroadcastCoordinatorSnapshot = {
@@ -46,6 +47,7 @@ export function useBroadcastRecording({
 	const [coordinatorSnapshot, setCoordinatorSnapshot] = useState(
 		emptyCoordinatorSnapshot,
 	);
+
 	const [coordinator] = useState(() =>
 		createBroadcastCoordinator({
 			onSnapshot: setCoordinatorSnapshot,
@@ -57,7 +59,8 @@ export function useBroadcastRecording({
 		(event: CaptureEvent) => coordinator.offerCapture(event),
 		[coordinator],
 	);
-	const realtime = useRealtimeConnection({
+
+	const realtime = useLiveRealtimeConnection({
 		sessionId,
 		deviceId,
 		onCommit: offerCapture,
@@ -78,15 +81,16 @@ export function useBroadcastRecording({
 					await heartbeat({ broadcastId });
 				},
 				stop: ({ broadcastId }) => stopBroadcast({ broadcastId }),
-				acceptCommit: (args) =>
-					acceptCommit({
+				acceptCommit: async (args) => {
+					await acceptCommit({
 						sessionId: args.sessionId,
 						broadcastId: args.broadcastId,
 						commitOrdinal: args.commitOrdinal,
 						commitId: args.commitId,
 						sourceText: args.sourceText,
 						sourceLanguage: args.sourceLanguage,
-					}),
+					});
+				},
 			},
 		});
 	}, [
@@ -105,6 +109,7 @@ export function useBroadcastRecording({
 
 	useEffect(() => {
 		window.addEventListener("pagehide", coordinator.handlePagehide);
+
 		return () =>
 			window.removeEventListener("pagehide", coordinator.handlePagehide);
 	}, [coordinator]);
@@ -113,10 +118,12 @@ export function useBroadcastRecording({
 
 	const toggleRecording = useCallback(() => {
 		const shouldStart = broadcastStatus === "lost";
+
 		const shouldStop =
 			!shouldStart &&
 			(realtime.isConnected ||
 				coordinator.snapshot().activeBroadcastId !== null);
+
 		return coordinator.run({ kind: shouldStop ? "stop" : "start" });
 	}, [broadcastStatus, coordinator, realtime.isConnected]);
 
@@ -124,6 +131,7 @@ export function useBroadcastRecording({
 		() => coordinator.abandon(),
 		[coordinator],
 	);
+
 	const clearRejectedCaptures = useCallback(
 		() => coordinator.clearRejectedCaptures(),
 		[coordinator],

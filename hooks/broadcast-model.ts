@@ -35,6 +35,7 @@ export type BroadcastCommandResult = {
 
 export function createBroadcastCommandGate() {
 	let busy = false;
+
 	return {
 		isBusy: () => busy,
 		run: async <A>(execute: () => Promise<A>): Promise<A> => {
@@ -43,7 +44,9 @@ export function createBroadcastCommandGate() {
 					message: "Another Broadcast command is already running",
 				});
 			}
+
 			busy = true;
+
 			try {
 				return await execute();
 			} finally {
@@ -54,24 +57,25 @@ export function createBroadcastCommandGate() {
 }
 
 export function toBroadcastCommandError(
-	error: unknown,
+	cause: unknown,
 ):
 	| BroadcastCommandConflict
 	| DisconnectTimeout
 	| BroadcastCommandError
 	| RealtimeTranscriptionError {
 	if (
-		error instanceof BroadcastCommandConflict ||
-		error instanceof DisconnectTimeout ||
-		error instanceof BroadcastCommandError ||
-		error instanceof RealtimeTranscriptionError
+		cause instanceof BroadcastCommandConflict ||
+		cause instanceof DisconnectTimeout ||
+		cause instanceof BroadcastCommandError ||
+		cause instanceof RealtimeTranscriptionError
 	) {
-		return error;
+		return cause;
 	}
-	if (error instanceof ConvexError) {
+
+	if (cause instanceof ConvexError) {
 		return new BroadcastCommandError({
 			message: Option.match(
-				Schema.decodeUnknownOption(convexFailureDataSchema)(error.data),
+				Schema.decodeUnknownOption(convexFailureDataSchema)(cause.data),
 				{
 					onNone: () => "Broadcast command failed",
 					onSome: ({ message }) => message,
@@ -79,9 +83,10 @@ export function toBroadcastCommandError(
 			),
 		});
 	}
-	throw error;
+
+	throw cause;
 }
 
-export function ignorePresentedBroadcastError(error: unknown): void {
-	toBroadcastCommandError(error);
+export function ignorePresentedBroadcastError(cause: unknown): void {
+	toBroadcastCommandError(cause);
 }

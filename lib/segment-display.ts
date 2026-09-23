@@ -13,6 +13,7 @@ export function getSegmentDisplay(segment: CaptionSegment, code: string) {
 	}
 
 	const translated = segment.translations[code];
+
 	if (translated) {
 		return { text: translated, pending: false };
 	}

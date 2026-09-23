@@ -1,4 +1,8 @@
 import { ConvexError, v } from "convex/values";
+import {
+	isTaggedPublicError,
+	publicErrorCode,
+} from "../shared/tagged-public-error";
 import { internalMutation, mutation } from "./_generated/server";
 import { authErrorCodes } from "./lib/auth";
 import type { HeartbeatExpiryArgs } from "./lib/broadcasts";
@@ -20,30 +24,18 @@ const publicErrorCodes = {
 	...sessionErrorCodes,
 };
 
-type TaggedPublicError = {
-	readonly _tag: string;
-	readonly message: string;
-};
-
-function isTaggedPublicError(error: unknown): error is TaggedPublicError {
-	if (typeof error !== "object" || error === null) return false;
-	const candidate = error as { _tag?: unknown; message?: unknown };
-	return (
-		typeof candidate._tag === "string" && typeof candidate.message === "string"
-	);
-}
-
 async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
 	try {
 		return await operation();
 	} catch (error) {
 		if (isTaggedPublicError(error)) {
-			const code =
-				publicErrorCodes[error._tag as keyof typeof publicErrorCodes];
+			const code = publicErrorCode(publicErrorCodes, error._tag);
+
 			if (code !== undefined) {
 				throw new ConvexError({ code, message: error.message });
 			}
 		}
+
 		throw error;
 	}
 }

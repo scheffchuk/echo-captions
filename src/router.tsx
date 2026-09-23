@@ -7,6 +7,7 @@ import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
 	const convex = new ConvexReactClient(getConvexUrl());
+
 	const storage =
 		typeof window === "undefined" ? undefined : window.localStorage;
 

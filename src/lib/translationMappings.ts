@@ -7,6 +7,7 @@ export type StoredTranslationMapping = {
 };
 
 export const MAX_TRANSLATION_MAPPINGS = 100;
+
 export const MAX_MAPPING_VALUE_CHARS = 200;
 
 export type MappingPolicyIssueCode =
@@ -68,6 +69,7 @@ export function canonicalizeTranslationMappings(
 	audienceLanguages: ReadonlyArray<string>,
 ): MappingPolicyResult {
 	const normalizedMappings = mappings.map(normalizeTranslationMapping);
+
 	const issues: MappingPolicyIssue[] =
 		normalizedMappings.filter((mapping) => !mappingIsBlank(mapping)).length >
 		MAX_TRANSLATION_MAPPINGS
@@ -82,6 +84,7 @@ export function canonicalizeTranslationMappings(
 	const audienceSet = new Set(
 		audienceLanguages.map((language) => normalizeLanguageCode(language)),
 	);
+
 	const seen = new Set<string>();
 	const canonical: StoredTranslationMapping[] = [];
 
@@ -89,6 +92,7 @@ export function canonicalizeTranslationMappings(
 		if (mappingIsBlank(mapping)) {
 			continue;
 		}
+
 		if (!mapping.term || !mapping.targetLanguage || !mapping.translation) {
 			issues.push({
 				code: "incomplete_mapping",
@@ -103,7 +107,9 @@ export function canonicalizeTranslationMappings(
 			});
 			continue;
 		}
+
 		let hasRowIssue = false;
+
 		if (!audienceSet.has(mapping.targetLanguage)) {
 			issues.push({
 				code: "invalid_audience_language",
@@ -113,6 +119,7 @@ export function canonicalizeTranslationMappings(
 			});
 			hasRowIssue = true;
 		}
+
 		if (characterCount(mapping.term) > MAX_MAPPING_VALUE_CHARS) {
 			issues.push({
 				code: "term_too_long",
@@ -122,6 +129,7 @@ export function canonicalizeTranslationMappings(
 			});
 			hasRowIssue = true;
 		}
+
 		if (characterCount(mapping.translation) > MAX_MAPPING_VALUE_CHARS) {
 			issues.push({
 				code: "translation_too_long",
@@ -133,6 +141,7 @@ export function canonicalizeTranslationMappings(
 		}
 
 		const key = normalizedMappingKey(mapping);
+
 		if (seen.has(key)) {
 			issues.push({
 				code: "duplicate_mapping",
@@ -142,9 +151,12 @@ export function canonicalizeTranslationMappings(
 			});
 			hasRowIssue = true;
 		}
+
 		seen.add(key);
+
 		if (!hasRowIssue) canonical.push(mapping);
 	}
+
 	if (issues.length > 0) return { ok: false, issues };
 
 	canonical.sort(
@@ -153,6 +165,7 @@ export function canonicalizeTranslationMappings(
 			compareStrings(folded(left.term), folded(right.term)) ||
 			compareStrings(left.term, right.term),
 	);
+
 	return { ok: true, mappings: canonical };
 }
 
@@ -160,11 +173,15 @@ function comparableMappings(
 	mappings: ReadonlyArray<StoredTranslationMapping>,
 ): StoredTranslationMapping[] {
 	return mappings
-		.map(normalizeTranslationMapping)
-		.filter(
-			(mapping) =>
-				mapping.term || mapping.targetLanguage || mapping.translation,
-		)
+		.flatMap((mapping) => {
+			const normalized = normalizeTranslationMapping(mapping);
+
+			return normalized.term ||
+				normalized.targetLanguage ||
+				normalized.translation
+				? [normalized]
+				: [];
+		})
 		.sort(
 			(left, right) =>
 				compareStrings(left.targetLanguage, right.targetLanguage) ||
@@ -180,6 +197,7 @@ export function canonicalTranslationMappingsEqual(
 ): boolean {
 	const leftComparable = comparableMappings(left);
 	const rightComparable = comparableMappings(right);
+
 	return (
 		leftComparable.length === rightComparable.length &&
 		leftComparable.every(
@@ -198,6 +216,7 @@ export function filterMappingsForAudience(
 	const audienceSet = new Set(
 		audienceLanguages.map((language) => normalizeLanguageCode(language)),
 	);
+
 	return mappings.filter((mapping) =>
 		audienceSet.has(normalizeLanguageCode(mapping.targetLanguage)),
 	);

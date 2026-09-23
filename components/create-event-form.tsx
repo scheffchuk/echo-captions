@@ -4,7 +4,7 @@ import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
-import { Schema } from "effect";
+import { Match, Schema } from "effect";
 import {
 	CalendarIcon,
 	Check,
@@ -95,7 +95,9 @@ const formSchema = Schema.Struct({
 });
 
 const formValidator = Schema.toStandardSchemaV1(formSchema);
+
 const eventNameValidator = Schema.toStandardSchemaV1(eventNameSchema);
+
 const spokenLanguagesValidator = Schema.toStandardSchemaV1(
 	spokenLanguagesSchema,
 );
@@ -115,13 +117,16 @@ class TranslationMappingInputError extends Error {}
 
 function createSessionInput(values: FormValues) {
 	const decoded = Schema.decodeUnknownSync(formSchema)(values);
+
 	const audienceCodes = Array.from(
 		new Set([...decoded.spokenLanguages, ...decoded.audienceLanguagesExtra]),
 	);
+
 	const mappingInput = projectTranslationMappingDraft(
 		createTranslationMappingDraft({ rows: decoded.translationMappings }),
 		audienceCodes,
 	);
+
 	if (!mappingInput.ok) {
 		throw new TranslationMappingInputError(
 			mappingInput.issues.map(mappingIssueMessage).join(" "),
@@ -172,6 +177,7 @@ function useCreateEventForm(
 		validators: { onSubmit: formValidator },
 		onSubmit: async ({ value, formApi }) => {
 			formApi.setErrorMap({ onSubmit: undefined });
+
 			try {
 				const { slug } = await createSession(createSessionInput(value));
 				onCreated(slug);
@@ -183,8 +189,10 @@ function useCreateEventForm(
 							fields: {},
 						},
 					});
+
 					return;
 				}
+
 				const failure = getPublicConvexError(err, "Couldn't create event");
 				formApi.setErrorMap({
 					onSubmit: {
@@ -200,30 +208,42 @@ function useCreateEventForm(
 
 type CreateEventFormApi = ReturnType<typeof useCreateEventForm>;
 
-function validationErrorMessage(error: unknown): string {
-	if (typeof error === "string") return error;
-	if (
-		typeof error === "object" &&
-		error !== null &&
-		"message" in error &&
-		typeof error.message === "string"
-	) {
-		return error.message;
-	}
-	return String(error);
+type FormFieldMessage = string | { message: string };
+
+type SubmitError = { form?: FormFieldMessage } | FormFieldMessage;
+
+function validationErrorMessage(error: FormFieldMessage): string {
+	return Match.value(error).pipe(
+		Match.when(Schema.is(Schema.String), (text) => text),
+		Match.orElse((value) => value.message),
+	);
 }
 
-function fieldErrorMessage(errors: unknown[]): string | undefined {
+function fieldErrorMessage(
+	errors: ReadonlyArray<FormFieldMessage | undefined>,
+): string | undefined {
 	const error = errors[0];
-	return error === undefined ? undefined : validationErrorMessage(error);
+
+	if (error === undefined) return undefined;
+
+	return validationErrorMessage(error);
 }
 
-function getFormErrorMessage(error: unknown): string | undefined {
-	if (!error) return undefined;
-	if (typeof error === "object" && error !== null && "form" in error) {
-		return validationErrorMessage(error.form);
-	}
-	return validationErrorMessage(error);
+function getFormErrorMessage(
+	error: SubmitError | undefined,
+): string | undefined {
+	if (error === undefined) return undefined;
+
+	return Match.value(error).pipe(
+		Match.when(Schema.is(Schema.String), (text) => text),
+		Match.when(
+			Schema.is(Schema.Struct({ message: Schema.String })),
+			(value) => value.message,
+		),
+		Match.orElse((value) =>
+			value.form === undefined ? undefined : validationErrorMessage(value.form),
+		),
+	);
 }
 
 const STEPS = [
@@ -315,6 +335,30 @@ export function CreateEventForm({
 }) {
 	const navigate = useNavigate();
 	const createSession = useMutation(api.sessions.create);
+
+	return (
+		<CreateEventFormView
+			triggerVariant={triggerVariant}
+			createSession={createSession}
+			onContinue={(options) => {
+				void navigate(options);
+			}}
+		/>
+	);
+}
+
+export function CreateEventFormView({
+	triggerVariant = "primary",
+	createSession,
+	onContinue,
+}: {
+	triggerVariant?: "primary" | "outline";
+	createSession: CreateSession;
+	onContinue: (options: {
+		to: "/broadcast/$slug";
+		params: { slug: string };
+	}) => void;
+}) {
 	const [open, setOpen] = useState(false);
 	const [currentStep, setCurrentStep] = useState(0);
 	const [direction, setDirection] = useState(1);
@@ -336,17 +380,22 @@ export function CreateEventForm({
 
 	const nextStep = async () => {
 		const fields = STEPS[currentStep].fields;
+
 		if (fields.length > 0) {
 			const errors = await form.validateField(fields[0], "submit");
+
 			if (errors.length > 0) return;
 		}
+
 		if (currentStep === STEPS.length - 1) {
 			if (form.state.isSubmitting) return;
 			void form.handleSubmit().catch((error) => {
 				if (!(error instanceof ConvexError)) throw error;
 			});
+
 			return;
 		}
+
 		setDirection(1);
 		setCurrentStep((s) => s + 1);
 	};
@@ -365,6 +414,7 @@ export function CreateEventForm({
 				open={open}
 				onOpenChange={(next) => {
 					setOpen(next);
+
 					if (!next) reset();
 				}}
 			>
@@ -455,6 +505,7 @@ export function CreateEventForm({
 							<form.Subscribe selector={(state) => state.errorMap.onSubmit}>
 								{(submitError) => {
 									const message = getFormErrorMessage(submitError);
+
 									return message ? (
 										<p role="alert" className="text-sm text-destructive">
 											{message}
@@ -510,7 +561,7 @@ export function CreateEventForm({
 					onOpenChange={setShareOpen}
 					onContinue={() => {
 						setShareOpen(false);
-						void navigate({
+						onContinue({
 							to: "/broadcast/$slug",
 							params: { slug: createdSlug },
 						});
@@ -567,6 +618,7 @@ function StepEventDetails({ form }: { form: CreateEventFormApi }) {
 			<form.Field name="eventDate">
 				{(field) => {
 					const eventDate = field.state.value;
+
 					return (
 						<Field>
 							<FieldLabel htmlFor={field.name}>Event Date</FieldLabel>
@@ -622,12 +674,15 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 					{(extraField) => {
 						const spoken = [...spokenField.state.value];
 						const extra = [...extraField.state.value];
+
 						const audienceSummary = spoken
 							.map(getCommonLanguageName)
 							.join(" · ");
+
 						const quickAudience = QUICK_AUDIENCE_CODES.filter(
 							(code) => !spoken.includes(code) && !extra.includes(code),
 						);
+
 						const audienceCodes = Array.from(new Set([...spoken, ...extra]));
 
 						const addExtra = (code: string) => {
@@ -745,7 +800,9 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 											}),
 											audienceCodes,
 										);
+
 										const issues = projection.ok ? [] : projection.issues;
+
 										return (
 											<TranslationMappingsField
 												mappings={mappingField.state.value}
@@ -812,6 +869,7 @@ function AddLanguageButton({
 	disabled?: boolean;
 }) {
 	const [open, setOpen] = useState(false);
+
 	const available = COMMON_LANGUAGES.filter(
 		(lang) => !disabledCodes.includes(lang.code),
 	);
@@ -841,6 +899,7 @@ function AddLanguageButton({
 									value={lang.name}
 									onSelect={() => {
 										onAdd(lang.code);
+
 										if (!persistOnSelect) setOpen(false);
 									}}
 								>

@@ -74,9 +74,11 @@ export function CaptionFeed({
 	pinnedToLatestRef.current = pinnedToLatest;
 
 	const lastItem = items.at(-1);
+
 	const lastDisplayText = lastItem
 		? getSegmentDisplay(lastItem.segment, languageCode).text
 		: "";
+
 	const latestKey = [
 		items.length,
 		lastItem?.id ?? "",
@@ -89,6 +91,7 @@ export function CaptionFeed({
 
 	const scrollToLatest = () => {
 		const node = scrollRef.current;
+
 		if (!node) return;
 		node.scrollTop = node.scrollHeight;
 	};
@@ -103,21 +106,27 @@ export function CaptionFeed({
 	useEffect(() => {
 		const content = contentRef.current;
 		const scroll = scrollRef.current;
+
 		if (!content || !scroll) return;
 
 		const observer = new ResizeObserver(() => {
 			if (!pinnedToLatestRef.current) return;
 			scroll.scrollTop = scroll.scrollHeight;
 		});
+
 		observer.observe(content);
+
 		return () => observer.disconnect();
 	}, []);
 
 	const handleScroll = () => {
 		const node = scrollRef.current;
+
 		if (!node) return;
+
 		const distanceFromBottom =
 			node.scrollHeight - node.clientHeight - node.scrollTop;
+
 		setPinnedToLatest(distanceFromBottom < 48);
 	};
 

@@ -9,5 +9,6 @@ export const Route = createFileRoute("/view/$slug")({
 
 function ViewerPage() {
 	const { slug } = Route.useParams();
+
 	return <ViewerInterface slug={slug} />;
 }

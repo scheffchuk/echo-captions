@@ -13,6 +13,7 @@ import {
 } from "./scribeClient";
 
 const emptyConfig = ConfigProvider.layer(ConfigProvider.fromUnknown({}));
+
 const configLayer = ConfigProvider.layer(
 	ConfigProvider.fromUnknown({ ELEVENLABS_API_KEY: "test-key" }),
 );
@@ -21,6 +22,7 @@ describe("Scribe", () => {
 	it("captures invalid provider configuration when its layer is acquired", async () => {
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
+
 			return yield* Effect.flip(scribe.createToken());
 		}).pipe(Effect.provide(Scribe.layer), Effect.provide(emptyConfig));
 
@@ -32,8 +34,10 @@ describe("Scribe", () => {
 		const blankConfig = ConfigProvider.layer(
 			ConfigProvider.fromUnknown({ ELEVENLABS_API_KEY: "  " }),
 		);
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
+
 			return yield* Effect.flip(scribe.createToken());
 		}).pipe(Effect.provide(Scribe.layer), Effect.provide(blankConfig));
 
@@ -43,14 +47,18 @@ describe("Scribe", () => {
 
 	it("makes no more than three attempts for transient failures", async () => {
 		let requests = 0;
+
 		const fetch = vi.fn<typeof globalThis.fetch>(async () => {
 			requests += 1;
+
 			return new Response(null, { status: 503 });
 		});
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
 			const fiber = yield* Effect.forkChild(Effect.flip(scribe.createToken()));
 			yield* TestClock.adjust("10 seconds");
+
 			return yield* Fiber.join(fiber);
 		}).pipe(
 			Effect.provide(Scribe.layer),
@@ -66,12 +74,16 @@ describe("Scribe", () => {
 
 	it("does not retry a rejected token request", async () => {
 		let requests = 0;
+
 		const fetch = vi.fn<typeof globalThis.fetch>(async () => {
 			requests += 1;
+
 			return new Response(null, { status: 401 });
 		});
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
+
 			return yield* Effect.flip(scribe.createToken());
 		}).pipe(
 			Effect.provide(Scribe.layer),
@@ -86,12 +98,16 @@ describe("Scribe", () => {
 
 	it("reports malformed token responses without retrying", async () => {
 		let requests = 0;
+
 		const fetch = vi.fn<typeof globalThis.fetch>(async () => {
 			requests += 1;
+
 			return Response.json({});
 		});
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
+
 			return yield* Effect.flip(scribe.createToken());
 		}).pipe(
 			Effect.provide(Scribe.layer),
@@ -108,8 +124,10 @@ describe("Scribe", () => {
 		const fetch = vi.fn<typeof globalThis.fetch>(async () =>
 			Response.json({ token: "  " }),
 		);
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
+
 			return yield* Effect.flip(scribe.createToken());
 		}).pipe(
 			Effect.provide(Scribe.layer),
@@ -125,21 +143,27 @@ describe("Scribe", () => {
 	it("bounds all token attempts to ten seconds", async () => {
 		let requests = 0;
 		let signalRequest: (() => void) | undefined;
+
 		const requestStarted = new Promise<void>((resolve) => {
 			signalRequest = resolve;
 		});
+
 		const fetch = vi.fn<typeof globalThis.fetch>(async () => {
 			requests += 1;
+
 			if (requests === 1) return Response.json({ token: "warm-token" });
 			signalRequest?.();
+
 			return await new Promise<Response>(() => undefined);
 		});
+
 		const program = Effect.gen(function* () {
 			const scribe = yield* Scribe;
 			yield* scribe.createToken();
 			const fiber = yield* Effect.forkChild(Effect.flip(scribe.createToken()));
 			yield* Effect.promise(() => requestStarted);
 			yield* TestClock.adjust("10 seconds");
+
 			return yield* Fiber.join(fiber);
 		}).pipe(
 			Effect.provide(Scribe.layer),

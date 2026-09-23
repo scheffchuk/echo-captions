@@ -20,6 +20,7 @@ export function getDefaultLoginFlow(
 	state: AccountState | undefined,
 ): LoginFlow | "loading" {
 	if (state === undefined) return "loading";
+
 	return state.hasAccount ? "signIn" : "signUp";
 }
 
@@ -28,30 +29,38 @@ export function getOperatorAccessState(
 	isOperator: boolean | undefined,
 ): OperatorAccessState {
 	if (auth.status === "loading") return "loading";
+
 	if (auth.status === "unauthenticated") return "unauthenticated";
+
 	if (isOperator === undefined) return "loading";
+
 	return isOperator ? "authorized" : "unauthorized";
 }
 
-export function getOperatorAuthErrorMessage(error: unknown): string {
-	if (!(error instanceof Error)) throw error;
-	const message = error.message.toLowerCase();
+export function getOperatorAuthErrorMessage(cause: unknown): string {
+	if (!(cause instanceof Error)) throw cause;
+	const message = cause.message.toLowerCase();
+
 	if (message.includes("sign up is disabled")) {
 		return "New accounts are not allowed on this deployment.";
 	}
+
 	if (message.includes("email")) {
 		return "Enter a valid email.";
 	}
+
 	if (
 		message.includes("8 characters") ||
 		message.includes("invalid password")
 	) {
 		return "Password must be at least 8 characters";
 	}
+
 	if (message.includes("credential")) {
 		return "That email or password wasn’t recognized.";
 	}
-	throw error;
+
+	throw cause;
 }
 
 export function useOperatorAuth() {

@@ -55,10 +55,7 @@ export function isCurrentCaptureGeneration(
 	return event.generation === buffer.generation;
 }
 
-export function appendCapture(
-	buffer: CaptureBuffer,
-	event: CaptureEvent,
-): { buffer: CaptureBuffer; capture: CapturedCommit | null } {
+export function appendCapture(buffer: CaptureBuffer, event: CaptureEvent) {
 	if (!isCurrentCaptureGeneration(event, buffer)) {
 		return { buffer, capture: null };
 	}
@@ -70,6 +67,7 @@ export function appendCapture(
 		sourceLanguage: event.sourceLanguage,
 		capturedAt: event.capturedAt,
 	};
+
 	return {
 		buffer: {
 			...buffer,
@@ -89,6 +87,7 @@ export function activateCaptureBuffer(
 		...capture,
 		commitOrdinal: lastCommitOrdinal + index + 1,
 	}));
+
 	return {
 		...buffer,
 		broadcastId,
@@ -105,6 +104,7 @@ export function rebaseCaptures(
 		...capture,
 		commitOrdinal: lastCommitOrdinal + index + 1,
 	}));
+
 	return {
 		...buffer,
 		nextCommitOrdinal: lastCommitOrdinal + pending.length + 1,
@@ -138,6 +138,7 @@ export function createRejectedCaptureOwner(): RejectedCaptureOwner {
 	const rejectedBySession = new Map<string, readonly RejectedCapture[]>();
 	const discardedIdsBySession = new Map<string, Set<string>>();
 	const listeners = new Set<(sessionId: string) => void>();
+
 	const notify = (sessionId: string) => {
 		for (const listener of listeners) listener(sessionId);
 	};
@@ -148,35 +149,45 @@ export function createRejectedCaptureOwner(): RejectedCaptureOwner {
 			const previous = rejectedBySession.get(sessionId) ?? [];
 			const existingIds = new Set(previous.map((capture) => capture.commitId));
 			const discardedIds = discardedIdsBySession.get(sessionId);
+
 			const additions = captures.filter(
 				(capture) =>
 					!existingIds.has(capture.commitId) &&
 					!discardedIds?.has(capture.commitId),
 			);
+
 			if (additions.length === 0) return false;
 			rejectedBySession.set(sessionId, [
 				...previous,
 				...additions.map((capture) => toRejectedCapture(capture, reason)),
 			]);
 			notify(sessionId);
+
 			return true;
 		},
 		remove: (sessionId, commitId) => {
 			const previous = rejectedBySession.get(sessionId);
+
 			if (!previous) return;
+
 			const remaining = previous.filter(
 				(capture) => capture.commitId !== commitId,
 			);
+
 			if (remaining.length === previous.length) return;
+
 			if (remaining.length === 0) rejectedBySession.delete(sessionId);
 			else rejectedBySession.set(sessionId, remaining);
 			notify(sessionId);
 		},
 		discardAll: (sessionId) => {
 			const previous = rejectedBySession.get(sessionId);
+
 			if (!previous) return;
+
 			const discardedIds =
 				discardedIdsBySession.get(sessionId) ?? new Set<string>();
+
 			for (const capture of previous) discardedIds.add(capture.commitId);
 			discardedIdsBySession.set(sessionId, discardedIds);
 			rejectedBySession.delete(sessionId);
@@ -184,6 +195,7 @@ export function createRejectedCaptureOwner(): RejectedCaptureOwner {
 		},
 		subscribe: (onChange) => {
 			listeners.add(onChange);
+
 			return () => listeners.delete(onChange);
 		},
 	};

@@ -27,12 +27,15 @@ export const languageErrorCodes = {
 export function normalizeLanguageList(codes: string[]): string[] {
 	const seen = new Set<string>();
 	const result: string[] = [];
+
 	for (const raw of codes) {
 		const code = normalizeLanguageCode(raw);
+
 		if (!code || seen.has(code)) continue;
 		seen.add(code);
 		result.push(code);
 	}
+
 	return result;
 }
 
@@ -51,6 +54,7 @@ export function computeTranslationTargets(
 	sourceLanguage: string,
 ): string[] {
 	const source = normalizeLanguageCode(sourceLanguage);
+
 	return audienceLanguages.filter((lang) => lang !== source);
 }
 
@@ -60,24 +64,32 @@ export function resolveSourceLanguage(
 ): string {
 	const spoken = normalizeLanguageList(spokenLanguages ?? []);
 	const fallback = spoken[0] ?? "en";
+
 	if (!detected?.trim()) return fallback;
+
 	const normalized =
 		fromScribeCode(detected) ?? normalizeLanguageCode(detected);
+
 	if (spoken.length === 0) return normalized;
+
 	if (spoken.includes(normalized)) return normalized;
+
 	return fallback;
 }
 
 export function validateSpokenLanguages(spokenLanguages: string[]) {
 	const normalized = normalizeLanguageList(spokenLanguages);
+
 	if (normalized.length < 1) {
 		throw new InvalidLanguage({ message: "Add at least one spoken language" });
 	}
+
 	if (normalized.length > MAX_SPOKEN_LANGUAGES) {
 		throw new InvalidLanguage({
 			message: `At most ${MAX_SPOKEN_LANGUAGES} spoken languages`,
 		});
 	}
+
 	for (const code of normalized) {
 		if (!isValidLanguageCode(code)) {
 			throw new InvalidLanguage({
@@ -85,6 +97,7 @@ export function validateSpokenLanguages(spokenLanguages: string[]) {
 			});
 		}
 	}
+
 	return normalized;
 }
 
@@ -93,6 +106,7 @@ export function validateAudienceLanguagesExtra(
 	extra: string[] | undefined,
 ) {
 	const normalizedExtra = normalizeLanguageList(extra ?? []);
+
 	for (const code of normalizedExtra) {
 		if (!isValidLanguageCode(code)) {
 			throw new InvalidLanguage({
@@ -100,11 +114,14 @@ export function validateAudienceLanguagesExtra(
 			});
 		}
 	}
+
 	const audience = computeAudienceLanguages(spokenLanguages, normalizedExtra);
+
 	if (audience.length < 1) {
 		throw new InvalidLanguage({
 			message: "Add at least one audience language",
 		});
 	}
+
 	return normalizedExtra;
 }

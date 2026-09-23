@@ -5,9 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { ConvexError } from "convex/values";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BroadcastGlossaryPanel } from "@/components/broadcast-glossary-panel";
+import { BroadcastGlossaryPanelView } from "@/components/broadcast-glossary-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { Id } from "@/convex/_generated/dataModel";
+import { testId } from "@/test/ids";
 
 if (!Element.prototype.hasPointerCapture) {
 	Element.prototype.hasPointerCapture = () => false;
@@ -18,25 +18,23 @@ if (!Element.prototype.scrollIntoView) {
 	Element.prototype.scrollIntoView = () => {};
 }
 
-const mocks = vi.hoisted(() => ({
-	updateMappings: vi.fn(),
-}));
+const updateMappings = vi.fn();
 
-vi.mock("convex/react", () => ({
-	useMutation: () => mocks.updateMappings,
-}));
+const sessionId = testId("sessions", "session-1");
 
-const sessionId = "session-1" as Id<"sessions">;
-const revisionId = "revision-1" as Id<"translationMappingRevisions">;
+const revisionId = testId("translationMappingRevisions", "revision-1");
+
 const initialMappings = [
 	{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 ];
 
 function GlossaryHarness() {
 	const [open, setOpen] = useState(true);
+
 	return (
 		<TooltipProvider>
-			<BroadcastGlossaryPanel
+			<BroadcastGlossaryPanelView
+				updateTranslationMappings={updateMappings}
 				sessionId={sessionId}
 				initialMappings={initialMappings}
 				initialRevisionId={revisionId}
@@ -55,7 +53,7 @@ afterEach(() => {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	mocks.updateMappings.mockResolvedValue({
+	updateMappings.mockResolvedValue({
 		revisionId: "revision-2",
 		changed: true,
 	});
@@ -71,8 +69,8 @@ describe("BroadcastGlossaryPanel", () => {
 		await user.type(replacement, "  エコー Prime  ");
 		await user.click(screen.getByRole("button", { name: "Save glossary" }));
 
-		await waitFor(() => expect(mocks.updateMappings).toHaveBeenCalledTimes(1));
-		expect(mocks.updateMappings).toHaveBeenCalledWith({
+		await waitFor(() => expect(updateMappings).toHaveBeenCalledTimes(1));
+		expect(updateMappings).toHaveBeenCalledWith({
 			sessionId,
 			expectedRevisionId: revisionId,
 			translationMappings: [
@@ -87,13 +85,19 @@ describe("BroadcastGlossaryPanel", () => {
 
 		await user.click(screen.getByRole("button", { name: "Add mapping" }));
 		const terms = screen.getAllByPlaceholderText("e.g. shici");
-		await user.type(terms[terms.length - 1] as HTMLElement, "Local");
+		const term = terms[terms.length - 1];
+
+		if (!(term instanceof HTMLElement)) {
+			throw new Error("Expected a term field");
+		}
+
+		await user.type(term, "Local");
 		await user.click(screen.getByRole("button", { name: "Save glossary" }));
 
 		expect(
 			screen.getByText("Complete this mapping or remove the row."),
 		).toBeInTheDocument();
-		expect(mocks.updateMappings).not.toHaveBeenCalled();
+		expect(updateMappings).not.toHaveBeenCalled();
 	});
 
 	it("asks before discarding draft edits", async () => {
@@ -102,7 +106,13 @@ describe("BroadcastGlossaryPanel", () => {
 
 		await user.click(screen.getByRole("button", { name: "Add mapping" }));
 		const terms = screen.getAllByPlaceholderText("e.g. shici");
-		await user.type(terms[terms.length - 1] as HTMLElement, "Local");
+		const term = terms[terms.length - 1];
+
+		if (!(term instanceof HTMLElement)) {
+			throw new Error("Expected a term field");
+		}
+
+		await user.type(term, "Local");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 
 		expect(screen.getByText("Discard glossary changes?")).toBeInTheDocument();
@@ -115,7 +125,7 @@ describe("BroadcastGlossaryPanel", () => {
 
 	it("keeps the draft after a revision conflict and reloads it explicitly", async () => {
 		const user = userEvent.setup();
-		mocks.updateMappings.mockRejectedValueOnce(
+		updateMappings.mockRejectedValueOnce(
 			new ConvexError({
 				code: "mapping_revision_conflict",
 				message: "Glossary changed elsewhere",

@@ -14,6 +14,7 @@ export function normalizeReturnTo(
 
 	const isInternalPath = value.startsWith("/");
 	const isAbsoluteUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+
 	if (!isInternalPath && !isAbsoluteUrl) {
 		return DEFAULT_RETURN_TO;
 	}

@@ -55,6 +55,7 @@ import { useOperatorAuth } from "../src/lib/auth/operator";
 
 function formatSessionDate(timestamp: number | undefined) {
 	if (!timestamp) return null;
+
 	return new Date(timestamp).toLocaleDateString(undefined, {
 		month: "short",
 		day: "numeric",
@@ -64,6 +65,7 @@ function formatSessionDate(timestamp: number | undefined) {
 
 function formatLastActivity(timestamp: number | undefined) {
 	if (!timestamp) return null;
+
 	return `Active ${new Date(timestamp).toLocaleDateString(undefined, {
 		month: "short",
 		day: "numeric",
@@ -72,9 +74,11 @@ function formatLastActivity(timestamp: number | undefined) {
 
 function formatLanguages(codes: string[]) {
 	if (codes.length === 0) return "No languages";
+
 	if (codes.length <= 3) {
 		return codes.map(getCommonLanguageName).join(" · ");
 	}
+
 	return `${codes
 		.slice(0, 2)
 		.map(getCommonLanguageName)
@@ -92,6 +96,7 @@ function formatSessionMeta(
 			? null
 			: formatLastActivity(session.lastActivityAt ?? session._creationTime),
 	].filter(Boolean);
+
 	return parts.join(" · ");
 }
 
@@ -100,8 +105,10 @@ function sortSessions(sessions: Array<Doc<"sessions"> & { isLive: boolean }>) {
 		if (a.isLive !== b.isLive) {
 			return a.isLive ? -1 : 1;
 		}
+
 		const aTime = a.lastActivityAt ?? a._creationTime;
 		const bTime = b.lastActivityAt ?? b._creationTime;
+
 		return bTime - aTime;
 	});
 }
@@ -111,7 +118,9 @@ function matchesQuery(
 	query: string,
 ) {
 	const q = query.trim().toLowerCase();
+
 	if (!q) return true;
+
 	return session.title.toLowerCase().includes(q);
 }
 
@@ -287,27 +296,36 @@ export function Dashboard() {
 	const [passwordOpen, setPasswordOpen] = useState(false);
 	const sessions = useQuery(api.sessions.listMine);
 	const deleteSession = useMutation(api.sessions.deleteSession);
+
 	const [sessionToDelete, setSessionToDelete] = useState<{
 		id: Id<"sessions">;
 		title: string;
 	} | null>(null);
+
 	const [deletingSessionId, setDeletingSessionId] =
 		useState<Id<"sessions"> | null>(null);
+
 	const [copyingSessionId, setCopyingSessionId] =
 		useState<Id<"sessions"> | null>(null);
+
 	const [copyingLinkSessionId, setCopyingLinkSessionId] =
 		useState<Id<"sessions"> | null>(null);
+
 	const [copiedSessionId, setCopiedSessionId] = useState<Id<"sessions"> | null>(
 		null,
 	);
+
 	const [copiedLinkSessionId, setCopiedLinkSessionId] =
 		useState<Id<"sessions"> | null>(null);
+
 	const [searchQuery, setSearchQuery] = useState("");
 
 	const sortedSessions = sessions ? sortSessions(sessions) : undefined;
+
 	const filteredSessions = sortedSessions?.filter((s) =>
 		matchesQuery(s, searchQuery),
 	);
+
 	const liveSessions = filteredSessions?.filter((s) => s.isLive) ?? [];
 	const idleSessions = filteredSessions?.filter((s) => !s.isLive) ?? [];
 	const isLaunchpad = liveSessions.length > 0;
@@ -324,10 +342,12 @@ export function Dashboard() {
 
 	const copyTranscript = async (sessionId: Id<"sessions">) => {
 		setCopyingSessionId(sessionId);
+
 		try {
 			const text = await convex.query(api.segments.transcriptText, {
 				sessionId,
 			});
+
 			await navigator.clipboard.writeText(text);
 			setCopiedSessionId(sessionId);
 			toast.success("Copied");
@@ -350,6 +370,7 @@ export function Dashboard() {
 
 	const copyViewerLink = async (slug: string, sessionId: Id<"sessions">) => {
 		setCopyingLinkSessionId(sessionId);
+
 		try {
 			await navigator.clipboard.writeText(getViewerUrl(slug));
 			setCopiedLinkSessionId(sessionId);
@@ -368,6 +389,7 @@ export function Dashboard() {
 		if (!sessionToDelete) return;
 
 		setDeletingSessionId(sessionToDelete.id);
+
 		try {
 			await deleteSession({ sessionId: sessionToDelete.id });
 			setSessionToDelete(null);

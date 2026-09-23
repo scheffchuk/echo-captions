@@ -29,6 +29,7 @@ import {
 } from "./translationMappings";
 
 const TRANSLATION_SCOPE = "https://www.googleapis.com/auth/cloud-translation";
+
 const ACCESS_TOKEN_CACHE_KEY = "access-token";
 
 export class GoogleConfigError extends Schema.TaggedError<GoogleConfigError>()(
@@ -102,8 +103,6 @@ const GoogleTranslateRequest = Schema.Struct({
 	model: Schema.String,
 });
 
-const decodeServiceAccount = Schema.decodeUnknownEffect(GoogleServiceAccount);
-
 export type EncodedTranslationDocument = {
 	mimeType: "text/plain" | "text/html";
 	contents: string;
@@ -163,61 +162,75 @@ function decodeFixedDocument(
 	const expected = new Map(
 		document.fixedSpans.map((span) => [span.id, span] as const),
 	);
+
 	if (expected.size !== document.fixedSpans.length) {
 		throw new MappingIntegrityError({
 			message: "Google returned duplicated mapping identities",
 		});
 	}
+
 	const seen = new Set<string>();
 	const fragment = parseFragment(translatedHtml);
 
+	const textValue = (node: DefaultTreeAdapterTypes.Node): string => {
+		if (node.nodeName !== "#text") return "";
+
+		// SAFETY: parse5 names text nodes "#text", and only those nodes carry value.
+		return (node as DefaultTreeAdapterTypes.TextNode).value;
+	};
+
 	const render = (node: DefaultTreeAdapterTypes.Node): string => {
 		if (node.nodeName === "#text") {
-			return (node as DefaultTreeAdapterTypes.TextNode).value;
+			return textValue(node);
 		}
+
 		if (node.nodeName === "#comment" || node.nodeName === "#documentType") {
 			return "";
 		}
+
 		if (!("childNodes" in node)) {
 			throw new MappingIntegrityError({
 				message: "Google returned malformed mapping markup",
 			});
 		}
+
 		if (!("attrs" in node)) return node.childNodes.map(render).join("");
 
 		const occurrenceId = attributeValue(node, "data-echo-occurrence");
 		const translate = attributeValue(node, "translate");
+
 		if (occurrenceId !== undefined || translate !== undefined) {
 			if (translate !== "no" || occurrenceId === undefined) {
 				throw new MappingIntegrityError({
 					message: "Google returned malformed mapping markup",
 				});
 			}
+
 			const span = expected.get(occurrenceId);
+
 			if (!span || seen.has(occurrenceId)) {
 				throw new MappingIntegrityError({
 					message:
 						"Google returned an unknown or duplicated mapping occurrence",
 				});
 			}
+
 			if (node.childNodes.some((child) => child.nodeName !== "#text")) {
 				throw new MappingIntegrityError({
 					message: "Google returned malformed mapping markup",
 				});
 			}
-			const sourceText = node.childNodes
-				.map((child) =>
-					child.nodeName === "#text"
-						? (child as DefaultTreeAdapterTypes.TextNode).value
-						: "",
-				)
-				.join("");
+
+			const sourceText = node.childNodes.map(textValue).join("");
+
 			if (sourceText !== span.sourceText) {
 				throw new MappingIntegrityError({
 					message: "Google changed a protected mapping occurrence",
 				});
 			}
+
 			seen.add(occurrenceId);
+
 			return span.replacement;
 		}
 
@@ -225,11 +238,13 @@ function decodeFixedDocument(
 	};
 
 	const result = fragment.childNodes.map(render).join("");
+
 	if (seen.size !== expected.size) {
 		throw new MappingIntegrityError({
 			message: "Google omitted a protected mapping occurrence",
 		});
 	}
+
 	return result;
 }
 
@@ -264,11 +279,14 @@ const parseRetryAfter = Effect.fn("GoogleTranslate.parseRetryAfter")(function* (
 	if (value === undefined) return undefined;
 
 	const seconds = Num.parse(value);
+
 	if (Option.isSome(seconds)) return Math.max(0, seconds.value * 1000);
 
 	const timestamp = DateTime.make(value);
+
 	if (Option.isNone(timestamp)) return undefined;
 	const now = yield* Clock.currentTimeMillis;
+
 	return Math.max(0, DateTime.toEpochMillis(timestamp.value) - now);
 });
 
@@ -278,10 +296,10 @@ const retrySchedule = Schedule.max([
 ]).pipe(
 	Schedule.jittered,
 	Schedule.setInputType<GoogleRequestError>(),
-	Schedule.while(({ input }) => input._tag === "GoogleTransientError"),
+	Schedule.while(({ input }) => input instanceof GoogleTransientError),
 	Schedule.modifyDelay(({ duration, input }) =>
 		Effect.succeed(
-			input._tag === "GoogleTransientError" &&
+			input instanceof GoogleTransientError &&
 				input.retryAfterMillis !== undefined
 				? Duration.max(duration, Duration.millis(input.retryAfterMillis))
 				: duration,
@@ -301,13 +319,16 @@ const loadGoogleConfig = Effect.fn("GoogleTranslate.config")(function* () {
 				}),
 		),
 	);
+
 	const projectId = configuredProjectId.trim();
+
 	if (!projectId) {
 		return yield* new GoogleConfigError({
 			operation: "Google.config",
 			message: "GOOGLE_CLOUD_PROJECT_ID is not configured",
 		});
 	}
+
 	const credentials = yield* Config.redacted(
 		"GOOGLE_APPLICATION_CREDENTIALS_JSON",
 	).pipe(
@@ -319,30 +340,28 @@ const loadGoogleConfig = Effect.fn("GoogleTranslate.config")(function* () {
 				}),
 		),
 	);
-	const parsed = yield* Effect.try({
-		try: (): unknown => JSON.parse(Redacted.value(credentials)),
+
+	const serviceAccount = yield* Effect.try({
+		try: () =>
+			Schema.decodeUnknownSync(GoogleServiceAccount)(
+				JSON.parse(Redacted.value(credentials)),
+			),
 		catch: () =>
 			new GoogleConfigError({
 				operation: "Google.config",
 				message: "Invalid Google credentials JSON",
 			}),
 	});
-	const serviceAccount = yield* decodeServiceAccount(parsed).pipe(
-		Effect.mapError(
-			() =>
-				new GoogleConfigError({
-					operation: "Google.config",
-					message: "Invalid Google credentials JSON",
-				}),
-		),
-	);
+
 	const clientEmail = serviceAccount.client_email.trim();
+
 	if (!clientEmail) {
 		return yield* new GoogleConfigError({
 			operation: "Google.config",
 			message: "Invalid Google credentials JSON",
 		});
 	}
+
 	const signingKey = yield* Effect.tryPromise({
 		try: () => jose.importPKCS8(serviceAccount.private_key, "RS256"),
 		catch: () =>
@@ -364,6 +383,7 @@ const signGoogleJwt = Effect.fn("GoogleTranslate.signJwt")(function* (
 	now: number,
 ) {
 	const issuedAt = Math.floor(now / 1000);
+
 	return yield* Effect.tryPromise({
 		try: () =>
 			new jose.SignJWT({ scope: TRANSLATION_SCOPE })
@@ -404,10 +424,18 @@ export class GoogleTranslate extends Context.Service<
 					const retryAfterMillis = yield* parseRetryAfter(
 						response.headers["retry-after"],
 					);
+
+					if (retryAfterMillis === undefined) {
+						return yield* new GoogleTransientError({
+							operation,
+							message: "Google provider is temporarily unavailable",
+						});
+					}
+
 					return yield* new GoogleTransientError({
 						operation,
 						message: "Google provider is temporarily unavailable",
-						...(retryAfterMillis !== undefined ? { retryAfterMillis } : {}),
+						retryAfterMillis,
 					});
 				},
 			);
@@ -418,19 +446,22 @@ export class GoogleTranslate extends Context.Service<
 				kind: "authentication" | "translation",
 			) {
 				const response = yield* client.execute(request).pipe(
-					Effect.catch((cause) =>
-						cause.reason._tag === "TransportError"
-							? new GoogleTransientError({
-									operation,
-									message: "Google provider is temporarily unavailable",
-								})
-							: Effect.die(cause),
+					Effect.catchReason(
+						"HttpClientError",
+						"TransportError",
+						() =>
+							new GoogleTransientError({
+								operation,
+								message: "Google provider is temporarily unavailable",
+							}),
+						(_reason, error) => Effect.die(error),
 					),
 				);
 
 				if (isTransientStatus(response.status)) {
 					return yield* transientResponse(operation, response);
 				}
+
 				if (response.status < 200 || response.status >= 300) {
 					return yield* kind === "authentication"
 						? new GoogleAuthenticationError({
@@ -452,6 +483,7 @@ export class GoogleTranslate extends Context.Service<
 				function* (_key: string) {
 					const now = yield* Clock.currentTimeMillis;
 					const jwt = yield* signGoogleJwt(config, now);
+
 					const request = HttpClientRequest.post(
 						"https://oauth2.googleapis.com/token",
 					).pipe(
@@ -460,31 +492,34 @@ export class GoogleTranslate extends Context.Service<
 							assertion: jwt,
 						}),
 					);
+
 					const response = yield* execute(
 						request,
 						"Google.authenticate",
 						"authentication",
 					);
+
+					const malformedToken = new GoogleResponseError({
+						operation: "Google.authenticate",
+						message: "Google returned a malformed token response",
+					});
+
 					const data = yield* HttpClientResponse.schemaBodyJson(
 						GoogleTokenResponse,
 					)(response).pipe(
-						Effect.catch((cause) => {
-							if (Schema.isSchemaError(cause)) {
-								return new GoogleResponseError({
-									operation: "Google.authenticate",
-									message: "Google returned a malformed token response",
-								});
-							}
-							return cause.reason._tag === "DecodeError" ||
-								cause.reason._tag === "EmptyBodyError"
-								? new GoogleResponseError({
-										operation: "Google.authenticate",
-										message: "Google returned a malformed token response",
-									})
-								: Effect.die(cause);
-						}),
+						Effect.catchTag("SchemaError", () => malformedToken),
+						Effect.catchReasons(
+							"HttpClientError",
+							{
+								DecodeError: () => malformedToken,
+								EmptyBodyError: () => malformedToken,
+							},
+							(_reason, error) => Effect.die(error),
+						),
 					);
+
 					const token = data.access_token.trim();
+
 					if (!token || data.expires_in <= 0) {
 						return yield* new GoogleResponseError({
 							operation: "Google.authenticate",
@@ -517,6 +552,7 @@ export class GoogleTranslate extends Context.Service<
 			const getAccessToken = Effect.fn("GoogleTranslate.getAccessToken")(
 				function* () {
 					const cached = yield* Cache.get(tokenCache, ACCESS_TOKEN_CACHE_KEY);
+
 					return cached.token;
 				},
 			);
@@ -530,9 +566,11 @@ export class GoogleTranslate extends Context.Service<
 			) {
 				const targetLanguage = document.targetLanguage;
 				const googleTarget = toGoogleCode(targetLanguage);
+
 				const googleSource = sourceLanguage
 					? toGoogleCode(sourceLanguage)
 					: undefined;
+
 				if (googleSource && googleSource === googleTarget) {
 					return yield* Effect.try({
 						try: () =>
@@ -549,53 +587,63 @@ export class GoogleTranslate extends Context.Service<
 									}),
 					});
 				}
+
 				const encoded = encodeTranslationDocument(document);
+
+				const translationRequest = {
+					contents: [encoded.contents],
+					targetLanguageCode: googleTarget,
+					mimeType: encoded.mimeType,
+					model: `projects/${config.projectId}/locations/global/models/general/nmt`,
+				};
 
 				const request = yield* HttpClientRequest.post(
 					`https://translation.googleapis.com/v3/projects/${config.projectId}/locations/global:translateText`,
 				).pipe(
 					HttpClientRequest.bearerToken(accessToken),
 					HttpClientRequest.acceptJson,
-					HttpClientRequest.schemaBodyJson(GoogleTranslateRequest)({
-						contents: [encoded.contents],
-						...(googleSource ? { sourceLanguageCode: googleSource } : {}),
-						targetLanguageCode: googleTarget,
-						mimeType: encoded.mimeType,
-						model: `projects/${config.projectId}/locations/global/models/general/nmt`,
-					}),
+					HttpClientRequest.schemaBodyJson(GoogleTranslateRequest)(
+						googleSource
+							? { ...translationRequest, sourceLanguageCode: googleSource }
+							: translationRequest,
+					),
 					Effect.orDie,
 				);
+
 				const response = yield* execute(
 					request,
 					"Google.translate",
 					"translation",
 				);
+
+				const malformedTranslation = new GoogleResponseError({
+					operation: "Google.translate",
+					message: "Google returned a malformed translation response",
+				});
+
 				const data = yield* HttpClientResponse.schemaBodyJson(
 					GoogleTranslateResponse,
 				)(response).pipe(
-					Effect.catch((cause) => {
-						if (Schema.isSchemaError(cause)) {
-							return new GoogleResponseError({
-								operation: "Google.translate",
-								message: "Google returned a malformed translation response",
-							});
-						}
-						return cause.reason._tag === "DecodeError" ||
-							cause.reason._tag === "EmptyBodyError"
-							? new GoogleResponseError({
-									operation: "Google.translate",
-									message: "Google returned a malformed translation response",
-								})
-							: Effect.die(cause);
-					}),
+					Effect.catchTag("SchemaError", () => malformedTranslation),
+					Effect.catchReasons(
+						"HttpClientError",
+						{
+							DecodeError: () => malformedTranslation,
+							EmptyBodyError: () => malformedTranslation,
+						},
+						(_reason, error) => Effect.die(error),
+					),
 				);
+
 				const translated = data.translations?.[0]?.translatedText?.trim();
+
 				if (!translated) {
 					return yield* new GoogleResponseError({
 						operation: "Google.translate",
 						message: "Google returned a malformed translation response",
 					});
 				}
+
 				return yield* Effect.try({
 					try: () => decodeTranslationDocument(document, translated),
 					catch: (cause) =>
@@ -607,9 +655,11 @@ export class GoogleTranslate extends Context.Service<
 								}),
 				});
 			});
+
 			const translateOne = Effect.fn("GoogleTranslate.translateOne")(
 				function* (document: TranslationDocument, sourceLanguage?: string) {
 					const accessToken = yield* getAccessToken();
+
 					return yield* translateToLanguageOnce(
 						accessToken,
 						document,

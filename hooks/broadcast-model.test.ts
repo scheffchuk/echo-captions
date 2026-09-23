@@ -13,6 +13,7 @@ describe("broadcast command gate", () => {
 	it("rejects duplicate commands and releases after the first command settles", async () => {
 		const gate = createBroadcastCommandGate();
 		let releaseFirst!: () => void;
+
 		const first = gate.run(
 			() =>
 				new Promise<void>((resolve) => {
@@ -36,9 +37,11 @@ describe("broadcast command error ownership", () => {
 	it("preserves known command failures", () => {
 		const error = new BroadcastCommandConflict({ message: "Already busy" });
 		expect(toBroadcastCommandError(error)).toBe(error);
+
 		const realtimeError = new RealtimeTranscriptionError({
 			message: "Realtime transcription failed",
 		});
+
 		expect(toBroadcastCommandError(realtimeError)).toBe(realtimeError);
 	});
 
@@ -46,6 +49,7 @@ describe("broadcast command error ownership", () => {
 		const result = toBroadcastCommandError(
 			new ConvexError({ code: "broadcast_conflict", message: "Try again" }),
 		);
+
 		expect(result).toBeInstanceOf(BroadcastCommandError);
 		expect(result.message).toBe("Try again");
 	});
@@ -54,6 +58,7 @@ describe("broadcast command error ownership", () => {
 		const result = toBroadcastCommandError(
 			new ConvexError({ code: "unknown" }),
 		);
+
 		expect(result.message).toBe("Broadcast command failed");
 	});
 

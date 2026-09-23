@@ -5,27 +5,34 @@ import {
 	modifyAccountCredentials,
 	retrieveAccount,
 } from "@convex-dev/auth/server";
+import { Option, Schema } from "effect";
 import { Scrypt } from "lucia";
 import { parseEmail } from "../shared/email";
 import { internal } from "./_generated/api";
 
-function assertPassword(password: unknown): string {
-	if (typeof password !== "string" || password.length < 8) {
-		throw new Error("Invalid password");
-	}
-	return password;
+function isCredentialText(value: unknown): value is string {
+	return Option.isSome(Schema.decodeUnknownOption(Schema.String)(value));
 }
 
 const password = ConvexCredentials({
 	id: "password",
 	authorize: async (params, ctx) => {
 		const flow = params.flow;
+
 		if (flow !== "signUp" && flow !== "signIn" && flow !== "changePassword") {
 			throw new Error("Invalid credentials");
 		}
 
+		if (!isCredentialText(params.email)) {
+			throw new Error("Invalid email");
+		}
+
+		if (!isCredentialText(params.password) || params.password.length < 8) {
+			throw new Error("Invalid password");
+		}
+
 		const email = parseEmail(params.email);
-		const passwordValue = assertPassword(params.password);
+		const passwordValue = params.password;
 
 		if (flow === "signUp") {
 			if (!(await ctx.runQuery(internal.users.signupAllowed, {}))) {
@@ -37,6 +44,7 @@ const password = ConvexCredentials({
 				account: { id: email, secret: passwordValue },
 				profile: { email },
 			});
+
 			return { userId: created.user._id };
 		}
 
@@ -44,15 +52,22 @@ const password = ConvexCredentials({
 			provider: "password",
 			account: { id: email, secret: passwordValue },
 		});
+
 		if (retrieved === null) {
 			throw new Error("Invalid credentials");
 		}
 
 		if (flow === "changePassword") {
-			const nextPassword = assertPassword(params.newPassword);
+			if (
+				!isCredentialText(params.newPassword) ||
+				params.newPassword.length < 8
+			) {
+				throw new Error("Invalid password");
+			}
+
 			await modifyAccountCredentials(ctx, {
 				provider: "password",
-				account: { id: email, secret: nextPassword },
+				account: { id: email, secret: params.newPassword },
 			});
 		}
 

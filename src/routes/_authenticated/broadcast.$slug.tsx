@@ -9,5 +9,6 @@ export const Route = createFileRoute("/_authenticated/broadcast/$slug")({
 
 function BroadcastPage() {
 	const { slug } = Route.useParams();
+
 	return <BroadcastInterface key={slug} slug={slug} />;
 }

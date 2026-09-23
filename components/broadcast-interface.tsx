@@ -54,7 +54,9 @@ import {
 
 function isEditableTarget(target: EventTarget | null) {
 	if (!(target instanceof HTMLElement)) return false;
+
 	if (target.isContentEditable) return true;
+
 	return Boolean(
 		target.closest("input, textarea, select, [contenteditable=true]"),
 	);
@@ -69,6 +71,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const [deviceId, setDeviceId] = useState(
 		() => getStoredMicDevice(slug) ?? "",
 	);
+
 	const [localTitle, setLocalTitle] = useState<string | null>(null);
 	const [localDescription, setLocalDescription] = useState<string | null>(null);
 	const [toolsOpen, setToolsOpen] = useState(false);
@@ -80,8 +83,10 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const audienceKey = audienceLanguages.join(",");
 	const defaultSourceLanguage = session?.spokenLanguages[0] ?? "en";
 	const broadcastStatus = session?.activeBroadcast?.status;
+
 	const lostBroadcastId =
 		broadcastStatus === "lost" ? session?.activeBroadcast?._id : null;
+
 	const hasLostBroadcast =
 		lostBroadcastId !== null && lostBroadcastId !== undefined;
 
@@ -92,6 +97,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const defaultLanguagePair = audienceKey
 		? resolveLanguagePair(slug, audienceKey.split(","))
 		: null;
+
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 
 	const { commits: operatorCommits } = useSessionOperatorCommits(session?._id);
@@ -100,6 +106,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		languagePair !== null &&
 		languagePair.length === 2 &&
 		audienceLanguages.length >= 2;
+
 	const [lang1, lang2] = isDual
 		? languagePair
 		: [
@@ -126,28 +133,38 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		recoverableBroadcastId: lostBroadcastId,
 		onError: toast.error,
 	});
+
 	const feedItems = operatorCommitsToFeedItems(
 		mergeOperatorCommitProjections(operatorCommits, optimisticCaptures),
 	);
 
 	const requestToggleRecording = () => {
 		if (voiceState === "connecting") return;
+
 		if (hasLostBroadcast) {
 			if (!deviceId) {
 				toast.error("Select a microphone before resuming.");
+
 				return;
 			}
+
 			void toggleRecording().catch(ignorePresentedBroadcastError);
+
 			return;
 		}
+
 		if (isConnected) {
 			setStopConfirmOpen(true);
+
 			return;
 		}
+
 		if (!deviceId) {
 			toast.error("Select a microphone before going live.");
+
 			return;
 		}
+
 		void toggleRecording().catch(ignorePresentedBroadcastError);
 	};
 
@@ -159,6 +176,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const confirmAbandon = async () => {
 		if (!lostBroadcastId) return;
 		setAbandoningBroadcast(true);
+
 		try {
 			await abandonBroadcast({ broadcastId: lostBroadcastId });
 			abandonRecording();
@@ -173,9 +191,11 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const exportRejectedCaptures = () => {
 		const content = formatRejectedCaptures(rejectedCaptures);
+
 		const url = URL.createObjectURL(
 			new Blob([content], { type: "text/plain;charset=utf-8" }),
 		);
+
 		const link = document.createElement("a");
 		link.href = url;
 		link.download = `echo-rejected-captures-${new Date().toISOString().slice(0, 10)}.txt`;
@@ -195,19 +215,25 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.code !== "Space" && event.key !== " ") return;
+
 			if (event.repeat) return;
+
 			if (isEditableTarget(event.target)) return;
+
 			if (
 				event.target instanceof HTMLElement &&
 				event.target.closest('[role="dialog"], [role="alertdialog"]')
 			) {
 				return;
 			}
+
 			if (stopConfirmOpenRef.current || toolsOpenRef.current) return;
 			event.preventDefault();
 			requestToggleRecordingRef.current();
 		};
+
 		window.addEventListener("keydown", onKeyDown);
+
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
 
@@ -217,7 +243,9 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 			event.preventDefault();
 			event.returnValue = "";
 		};
+
 		window.addEventListener("beforeunload", onBeforeUnload);
+
 		return () => window.removeEventListener("beforeunload", onBeforeUnload);
 	}, []);
 
@@ -229,12 +257,14 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const title = localTitle ?? session?.title ?? "Untitled";
 	const description = localDescription ?? session?.description;
 	const audienceCodes = session?.audienceLanguages ?? [];
+
 	const showSetupHint =
 		!hasLostBroadcast &&
 		broadcastStatus !== "stopping" &&
 		!isConnected &&
 		feedItems.length === 0 &&
 		!partialText;
+
 	const rejectedCapturesNotice =
 		rejectedCaptures.length > 0 ? (
 			<div className="flex shrink-0 flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -258,6 +288,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				</div>
 			</div>
 		) : null;
+
 	const stoppingBroadcastNotice =
 		broadcastStatus === "stopping" ? (
 			<div className="flex shrink-0 items-center rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
@@ -272,6 +303,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const persistTitle = async (nextTitle: string) => {
 		setLocalTitle(nextTitle);
+
 		if (session) {
 			await updateTitle({ sessionId: session._id, title: nextTitle });
 		}
@@ -279,6 +311,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const persistDescription = async (nextDescription: string) => {
 		setLocalDescription(nextDescription);
+
 		if (session) {
 			await updateDescription({
 				sessionId: session._id,

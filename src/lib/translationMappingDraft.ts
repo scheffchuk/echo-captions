@@ -1,3 +1,5 @@
+import { Match } from "effect";
+import type { Id } from "@/convex/_generated/dataModel";
 import { normalizeLanguageCode } from "../../shared/languages";
 import {
 	canonicalizeTranslationMappings,
@@ -30,7 +32,7 @@ export type TranslationMappingDraftIssue = {
 
 export type TranslationMappingDraft = {
 	rows: TranslationMappingDraftRow[];
-	baseRevisionId: string | null;
+	baseRevisionId: Id<"translationMappingRevisions"> | null;
 	baseMappings: StoredTranslationMapping[];
 	conflict: boolean;
 };
@@ -49,7 +51,7 @@ export function createTranslationMappingDraft({
 	baseMappings = [],
 }: {
 	rows?: ReadonlyArray<TranslationMappingDraftRow>;
-	baseRevisionId?: string | null;
+	baseRevisionId?: Id<"translationMappingRevisions"> | null;
 	baseMappings?: ReadonlyArray<StoredTranslationMapping>;
 } = {}): TranslationMappingDraft {
 	return {
@@ -62,10 +64,11 @@ export function createTranslationMappingDraft({
 
 export function hydrateTranslationMappingDraft(
 	mappings: ReadonlyArray<StoredTranslationMapping> | undefined,
-	baseRevisionId: string | null | undefined,
+	baseRevisionId: Id<"translationMappingRevisions"> | null | undefined,
 	idFactory: TranslationMappingIdFactory,
 ): TranslationMappingDraft {
 	const savedMappings = [...(mappings ?? [])];
+
 	return createTranslationMappingDraft({
 		rows: savedMappings.map((mapping) => ({ ...mapping, id: idFactory() })),
 		baseRevisionId: baseRevisionId ?? null,
@@ -131,25 +134,27 @@ function issueFromPolicy(
 		policyIssue.index === undefined
 			? DRAFT_ISSUE_ROW
 			: (rows[policyIssue.index]?.id ?? DRAFT_ISSUE_ROW);
+
 	const code =
 		policyIssue.code === "incomplete_mapping"
 			? "incomplete_row"
 			: policyIssue.code;
-	const field =
-		code === "translation_too_long"
-			? "translation"
-			: code === "invalid_audience_language"
-				? "targetLanguage"
-				: (policyIssue.field ?? "term");
+
+	const field = Match.value(code).pipe(
+		Match.when("translation_too_long", () => "translation" as const),
+		Match.when("invalid_audience_language", () => "targetLanguage" as const),
+		Match.orElse(() => policyIssue.field ?? "term"),
+	);
+
 	return issue(rowId, field, code);
 }
 
 function contentForComparison(
 	rows: ReadonlyArray<TranslationMappingDraftRow>,
 ): StoredTranslationMapping[] {
-	return rows
-		.filter((row) => !rowIsBlank(row))
-		.map(normalizeTranslationMapping);
+	return rows.flatMap((row) =>
+		rowIsBlank(row) ? [] : [normalizeTranslationMapping(row)],
+	);
 }
 
 function mappingsMatch(
@@ -158,6 +163,7 @@ function mappingsMatch(
 ): boolean {
 	const normalizedLeft = normalizeTranslationMapping(left);
 	const normalizedRight = normalizeTranslationMapping(right);
+
 	return (
 		normalizedLeft.term === normalizedRight.term &&
 		normalizedLeft.targetLanguage === normalizedRight.targetLanguage &&
@@ -171,11 +177,14 @@ export function isTranslationMappingDraftDirty(
 	projection?: TranslationMappingDraftProjection,
 ): boolean {
 	if (draft.conflict) return true;
+
 	if (audienceCodes !== undefined) {
 		const projected =
 			projection ?? projectTranslationMappingDraft(draft, audienceCodes);
+
 		if (!projected.ok) return true;
 	}
+
 	return !canonicalTranslationMappingsEqual(
 		contentForComparison(draft.rows),
 		draft.baseMappings,
@@ -190,36 +199,45 @@ export function projectTranslationMappingDraft(
 		draft.rows.map(({ id: _id, ...mapping }) => mapping),
 		audienceCodes,
 	);
+
 	if (!result.ok) {
 		const issues = result.issues.map((policyIssue) =>
 			issueFromPolicy(draft.rows, policyIssue),
 		);
+
 		if (draft.conflict) issues.push(issue(DRAFT_ISSUE_ROW, "term", "conflict"));
+
 		return { ok: false, issues };
 	}
+
 	if (draft.conflict) {
 		return {
 			ok: false,
 			issues: [issue(DRAFT_ISSUE_ROW, "term", "conflict")],
 		};
 	}
+
 	return { ok: true, mappings: result.mappings };
 }
 
 export function reconcileTranslationMappingDraft(
 	draft: TranslationMappingDraft,
 	latestMappings: ReadonlyArray<StoredTranslationMapping> | undefined,
-	latestRevisionId: string | null | undefined,
+	latestRevisionId: Id<"translationMappingRevisions"> | null | undefined,
 	idFactory: TranslationMappingIdFactory,
 	audienceCodes?: ReadonlyArray<string>,
 ): TranslationMappingDraft {
 	const normalizedRevisionId = latestRevisionId ?? null;
+
 	if (draft.baseRevisionId === normalizedRevisionId) return draft;
+
 	if (isTranslationMappingDraftDirty(draft)) {
 		return { ...draft, conflict: true };
 	}
+
 	const latest = [...(latestMappings ?? [])];
 	const audience = new Set((audienceCodes ?? []).map(normalizeLanguageCode));
+
 	const retainedAudienceRows = audienceCodes
 		? draft.baseMappings.filter(
 				(mapping) =>
@@ -227,11 +245,13 @@ export function reconcileTranslationMappingDraft(
 					!latest.some((candidate) => mappingsMatch(mapping, candidate)),
 			)
 		: [];
+
 	const next = hydrateTranslationMappingDraft(
 		[...latest, ...retainedAudienceRows],
 		normalizedRevisionId,
 		idFactory,
 	);
+
 	return retainedAudienceRows.length === 0
 		? next
 		: { ...next, baseMappings: latest };

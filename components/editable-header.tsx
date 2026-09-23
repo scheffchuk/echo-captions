@@ -24,6 +24,7 @@ export function EditableHeader({
 	const [editingField, setEditingField] = useState<
 		"title" | "description" | null
 	>(null);
+
 	const [draftTitle, setDraftTitle] = useState(title);
 	const [draftDescription, setDraftDescription] = useState(description ?? "");
 
@@ -56,6 +57,7 @@ export function EditableHeader({
 	const commitTitle = () => {
 		setEditingField(null);
 		const nextTitle = draftTitle.trim() || "Untitled";
+
 		if (nextTitle !== title) {
 			onTitleChange?.(nextTitle);
 		}
@@ -64,6 +66,7 @@ export function EditableHeader({
 	const commitDescription = () => {
 		setEditingField(null);
 		const nextDescription = draftDescription.trim();
+
 		if (nextDescription !== (description ?? "")) {
 			onDescriptionChange?.(nextDescription);
 		}
@@ -74,6 +77,7 @@ export function EditableHeader({
 			e.preventDefault();
 			commitTitle();
 		}
+
 		if (e.key === "Escape") {
 			setEditingField(null);
 		}
@@ -84,6 +88,7 @@ export function EditableHeader({
 			e.preventDefault();
 			commitDescription();
 		}
+
 		if (e.key === "Escape") {
 			setEditingField(null);
 		}
@@ -92,6 +97,7 @@ export function EditableHeader({
 	const titleClass = compact
 		? "text-title font-bold"
 		: "text-display font-bold leading-tight";
+
 	const inputTitleClass = cn(
 		titleClass,
 		"w-full border-b border-border bg-transparent outline-none",

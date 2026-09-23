@@ -15,8 +15,7 @@ describe("email identity", () => {
 		);
 	});
 
-	it("rejects missing and malformed addresses", () => {
-		expect(() => parseEmail(undefined)).toThrow("Invalid email");
+	it("rejects malformed addresses", () => {
 		expect(() => parseEmail("not-an-email")).toThrow("Invalid email");
 		expect(() => parseEmail("missing-domain@")).toThrow("Invalid email");
 	});

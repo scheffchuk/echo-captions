@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	canonicalizeTranslationMappings,
 	MappingValidationError,
-	makeTranslationDocuments,
+	translationDocuments,
 } from "./translationMappings";
 
 const audienceLanguages = ["en", "ja", "de"];
@@ -72,7 +72,8 @@ describe("translation mappings", () => {
 		const mappings = canonicalize([
 			{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 		]);
-		const [document] = makeTranslationDocuments("echo ECHO Echoes", mappings, [
+
+		const [document] = translationDocuments("echo ECHO Echoes", mappings, [
 			"ja",
 		]);
 
@@ -96,7 +97,8 @@ describe("translation mappings", () => {
 		const mappings = canonicalize([
 			{ term: "İ", targetLanguage: "ja", translation: "イ" },
 		]);
-		const [document] = makeTranslationDocuments("i\u0307", mappings, ["ja"]);
+
+		const [document] = translationDocuments("i\u0307", mappings, ["ja"]);
 
 		expect(document?.fixedSpans.map((span) => span.sourceText)).toEqual([
 			"i\u0307",
@@ -105,9 +107,11 @@ describe("translation mappings", () => {
 		const reverseMappings = canonicalize([
 			{ term: "i\u0307", targetLanguage: "ja", translation: "イ" },
 		]);
-		const [reverseDocument] = makeTranslationDocuments("İ", reverseMappings, [
+
+		const [reverseDocument] = translationDocuments("İ", reverseMappings, [
 			"ja",
 		]);
+
 		expect(reverseDocument?.fixedSpans.map((span) => span.sourceText)).toEqual([
 			"İ",
 		]);
@@ -117,9 +121,8 @@ describe("translation mappings", () => {
 		const mappings = canonicalize([
 			{ term: "日本", targetLanguage: "en", translation: "Japan" },
 		]);
-		const [document] = makeTranslationDocuments("日本語と日本", mappings, [
-			"en",
-		]);
+
+		const [document] = translationDocuments("日本語と日本", mappings, ["en"]);
 
 		expect(document?.fixedSpans.map((span) => span.sourceText)).toEqual([
 			"日本",
@@ -132,7 +135,8 @@ describe("translation mappings", () => {
 			{ term: "New York", targetLanguage: "ja", translation: "ニューヨーク" },
 			{ term: "York", targetLanguage: "ja", translation: "ヨーク" },
 		]);
-		const [document] = makeTranslationDocuments(
+
+		const [document] = translationDocuments(
 			"New York is bigger than York",
 			mappings,
 			["ja"],
@@ -148,7 +152,8 @@ describe("translation mappings", () => {
 		const mappings = canonicalize([
 			{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 		]);
-		const documents = makeTranslationDocuments("Echo", mappings, ["ja", "de"]);
+
+		const documents = translationDocuments("Echo", mappings, ["ja", "de"]);
 
 		expect(documents[0]).toMatchObject({ targetLanguage: "ja" });
 		expect(documents[0]?.fixedSpans).toHaveLength(1);
@@ -164,7 +169,8 @@ describe("translation mappings", () => {
 			{ term: "Echo", targetLanguage: "ja", translation: "Echo Prime" },
 			{ term: "Prime", targetLanguage: "ja", translation: "二次" },
 		]);
-		const [document] = makeTranslationDocuments("Echo", mappings, ["ja"]);
+
+		const [document] = translationDocuments("Echo", mappings, ["ja"]);
 
 		expect(document?.fixedSpans[0]?.replacement).toBe("Echo Prime");
 	});

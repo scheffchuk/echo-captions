@@ -10,16 +10,17 @@ const publicErrorDataSchema = Schema.Union([
 ]);
 
 export function getPublicConvexError(
-	error: unknown,
+	cause: unknown,
 	fallbackMessage: string,
 ): { code: string | undefined; message: string } {
-	if (!(error instanceof ConvexError)) throw error;
+	if (!(cause instanceof ConvexError)) throw cause;
+
 	return Option.match(
-		Schema.decodeUnknownOption(publicErrorDataSchema)(error.data),
+		Schema.decodeUnknownOption(publicErrorDataSchema)(cause.data),
 		{
 			onNone: () => ({ code: undefined, message: fallbackMessage }),
 			onSome: (data) =>
-				typeof data === "string"
+				Schema.is(Schema.String)(data)
 					? { code: undefined, message: data }
 					: { code: data.code, message: data.message },
 		},
@@ -27,12 +28,13 @@ export function getPublicConvexError(
 }
 
 export function getClipboardErrorMessage(
-	error: unknown,
+	cause: unknown,
 	fallbackMessage: string,
 ): string {
 	const decoded = Option.getOrUndefined(
-		Schema.decodeUnknownOption(Schema.Struct({ name: Schema.String }))(error),
+		Schema.decodeUnknownOption(Schema.Struct({ name: Schema.String }))(cause),
 	);
+
 	if (
 		decoded?.name === "NotAllowedError" ||
 		decoded?.name === "SecurityError" ||
@@ -40,5 +42,6 @@ export function getClipboardErrorMessage(
 	) {
 		return fallbackMessage;
 	}
-	throw error;
+
+	throw cause;
 }

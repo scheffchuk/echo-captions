@@ -14,8 +14,8 @@ export function ThemeToggle({
 }) {
 	const { theme, setTheme, resolvedTheme } = useTheme();
 	const isDark = (theme === "system" ? resolvedTheme : theme) === "dark";
-	const buttonSize =
-		size === "icon-sm" ? "icon-sm" : size === "icon" ? "icon" : "sm";
+
+	const buttonSize = size;
 
 	return (
 		<Button

@@ -25,6 +25,7 @@ function pairLabel(pair: LanguagePair, compact: boolean): string {
 			? formatLanguagePairLabelCompact(pair)
 			: formatLanguagePairLabel(pair);
 	}
+
 	return compact
 		? formatLanguageLabelCompact(pair[0])
 		: getCommonLanguageName(pair[0]);
@@ -59,19 +60,23 @@ export function LanguagePairPicker({
 		if (!canPickTwo) {
 			onChange([code]);
 			setOpen(false);
+
 			return;
 		}
 
 		if (selected.includes(code)) {
 			const next = selected.filter((item) => item !== code);
+
 			if (next.length === 0) return;
 			onChange(next.length === 2 ? [next[0], next[1]] : [next[0]]);
+
 			return;
 		}
 
 		if (selected.length === 1) {
 			onChange([selected[0], code]);
 			setOpen(false);
+
 			return;
 		}
 
@@ -104,6 +109,7 @@ export function LanguagePairPicker({
 			open={open}
 			onOpenChange={(next) => {
 				setOpen(next);
+
 				if (!next) setPickingTranslation(false);
 			}}
 		>
@@ -155,6 +161,7 @@ export function LanguagePairPicker({
 								</p>
 								{languages.map((code) => {
 									const isPrimary = pair[0] === code;
+
 									return (
 										<button
 											key={code}

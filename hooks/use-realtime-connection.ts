@@ -3,7 +3,9 @@
 import {
 	AudioFormat,
 	CommitStrategy,
+	type ScribeCallbacks,
 	type ScribeStatus,
+	type UseScribeReturn,
 	useScribe,
 } from "@elevenlabs/react";
 import { useAction } from "convex/react";
@@ -21,6 +23,7 @@ import { fromScribeCode } from "@/lib/languages";
 export type RealtimeConnectionState = ScribeStatus;
 
 const DISCONNECT_TIMEOUT_MS = 2_000;
+
 const CONNECTION_READY_TIMEOUT_MS = 5_000;
 
 type ConnectionReadyWaiter = {
@@ -30,18 +33,79 @@ type ConnectionReadyWaiter = {
 	timeoutId: number;
 };
 
+type RealtimeScribe = Pick<
+	UseScribeReturn,
+	| "status"
+	| "partialTranscript"
+	| "isConnected"
+	| "connect"
+	| "disconnect"
+	| "getConnection"
+	| "clearTranscripts"
+>;
+
+type RealtimeScribeHandlers = Required<
+	Pick<
+		ScribeCallbacks,
+		| "onPartialTranscript"
+		| "onCommittedTranscriptWithTimestamps"
+		| "onError"
+		| "onAuthError"
+		| "onQuotaExceededError"
+		| "onCommitThrottledError"
+		| "onTranscriberError"
+		| "onUnacceptedTermsError"
+		| "onRateLimitedError"
+		| "onInputError"
+		| "onQueueOverflowError"
+		| "onResourceExhaustedError"
+		| "onSessionTimeLimitExceededError"
+		| "onChunkSizeExceededError"
+		| "onInsufficientAudioActivityError"
+		| "onConnect"
+		| "onSessionStarted"
+		| "onDisconnect"
+	>
+>;
+
+const idleScribeHandlers: RealtimeScribeHandlers = {
+	onPartialTranscript: () => {},
+	onCommittedTranscriptWithTimestamps: () => {},
+	onError: () => {},
+	onAuthError: () => {},
+	onQuotaExceededError: () => {},
+	onCommitThrottledError: () => {},
+	onTranscriberError: () => {},
+	onUnacceptedTermsError: () => {},
+	onRateLimitedError: () => {},
+	onInputError: () => {},
+	onQueueOverflowError: () => {},
+	onResourceExhaustedError: () => {},
+	onSessionTimeLimitExceededError: () => {},
+	onChunkSizeExceededError: () => {},
+	onInsufficientAudioActivityError: () => {},
+	onConnect: () => {},
+	onSessionStarted: () => {},
+	onDisconnect: () => {},
+};
+
 export function useRealtimeConnection({
 	sessionId,
 	deviceId,
 	onCommit,
 	onError,
+	getScribeToken,
+	scribe,
+	registerHandlers,
 }: {
 	sessionId: Id<"sessions"> | undefined;
 	deviceId: string;
 	onCommit?: (event: CaptureEvent) => void;
 	onError?: (message: string) => void;
+	getScribeToken: (args: Record<string, never>) => Promise<{ token: string }>;
+	scribe: RealtimeScribe;
+	registerHandlers: (handlers: RealtimeScribeHandlers) => void;
 }) {
-	const getScribeToken = useAction(api.scribe.getScribeToken);
 	const sessionIdRef = useRef(sessionId);
 	const onCommitRef = useRef(onCommit);
 	const onErrorRef = useRef(onError);
@@ -51,6 +115,7 @@ export function useRealtimeConnection({
 	const mountedRef = useRef(true);
 	const failedGenerationRef = useRef<number | null>(null);
 	const connectionReadyWaiterRef = useRef<ConnectionReadyWaiter | null>(null);
+
 	const disconnectWaiterRef = useRef<{
 		resolve: () => void;
 		reject: (error: DisconnectTimeout) => void;
@@ -61,40 +126,34 @@ export function useRealtimeConnection({
 	sessionIdRef.current = sessionId;
 	onCommitRef.current = onCommit;
 	onErrorRef.current = onError;
+
 	const reportRealtimeFailure = useCallback((message: string) => {
 		const generation = activeGenerationRef.current;
+
 		if (generation === null || failedGenerationRef.current === generation)
 			return;
 		failedGenerationRef.current = generation;
 		const failure = new RealtimeTranscriptionError({ message });
 		const waiter = connectionReadyWaiterRef.current;
+
 		if (waiter?.generation === generation) {
 			connectionReadyWaiterRef.current = null;
 			window.clearTimeout(waiter.timeoutId);
 			waiter.reject(failure);
+
 			return;
 		}
+
 		onErrorRef.current?.(failure.message);
 	}, []);
 
-	const scribe = useScribe({
-		modelId: "scribe_v2_realtime",
-		commitStrategy: CommitStrategy.VAD,
-		// SDK rejects <= 0.3 (exclusive); docs claim "between 0.3 and 3.0".
-		vadSilenceThresholdSecs: 0.31,
-		vadThreshold: 0.3,
-		includeLanguageDetection: true,
-		audioFormat: AudioFormat.PCM_16000,
-		microphone: {
-			echoCancellation: true,
-			noiseSuppression: true,
-			autoGainControl: true,
-		},
+	registerHandlers({
 		onPartialTranscript: () => {},
 		onCommittedTranscriptWithTimestamps: (data) => {
 			const generation = activeGenerationRef.current;
 			const transcript = data.text.trim();
 			const activeSessionId = sessionIdRef.current;
+
 			if (generation === null || !activeSessionId || !transcript) {
 				return;
 			}
@@ -145,34 +204,42 @@ export function useRealtimeConnection({
 			),
 		onConnect: () => {
 			const waiter = connectionReadyWaiterRef.current;
+
 			if (!waiter || waiter.generation !== activeGenerationRef.current) {
 				return;
 			}
+
 			connectionReadyWaiterRef.current = null;
 			window.clearTimeout(waiter.timeoutId);
 			waiter.resolve();
 		},
 		onSessionStarted: () => {
 			const waiter = connectionReadyWaiterRef.current;
+
 			if (!waiter || waiter.generation !== activeGenerationRef.current) {
 				return;
 			}
+
 			connectionReadyWaiterRef.current = null;
 			window.clearTimeout(waiter.timeoutId);
 			waiter.resolve();
 		},
 		onDisconnect: () => {
 			const generation = activeGenerationRef.current;
+
 			const expectedClose =
 				generation === null || closingGenerationRef.current === generation;
+
 			if (!expectedClose) {
 				reportRealtimeFailure(
 					"Realtime transcription disconnected unexpectedly. Start recording again.",
 				);
 			}
+
 			activeGenerationRef.current = null;
 			closingGenerationRef.current = null;
 			const readyWaiter = connectionReadyWaiterRef.current;
+
 			if (readyWaiter) {
 				connectionReadyWaiterRef.current = null;
 				window.clearTimeout(readyWaiter.timeoutId);
@@ -182,38 +249,47 @@ export function useRealtimeConnection({
 					}),
 				);
 			}
+
 			const waiter = disconnectWaiterRef.current;
+
 			if (!waiter) return;
 			disconnectWaiterRef.current = null;
 			window.clearTimeout(waiter.timeoutId);
 			waiter.resolve();
 		},
 	});
+
 	const scribeRef = useRef(scribe);
 	scribeRef.current = scribe;
 	useEffect(() => {
 		mountedRef.current = true;
+
 		return () => {
 			mountedRef.current = false;
 			closingGenerationRef.current = generationRef.current;
 			activeGenerationRef.current = null;
 			const waiter = connectionReadyWaiterRef.current;
+
 			if (waiter) {
 				connectionReadyWaiterRef.current = null;
 				window.clearTimeout(waiter.timeoutId);
 				waiter.resolve();
 			}
+
 			scribeRef.current.getConnection()?.close();
 		};
 	}, []);
 
 	const connect = useCallback(async () => {
+		const currentScribe = scribeRef.current;
+
 		if (!deviceId || !sessionIdRef.current) return false;
+
 		if (
 			!mountedRef.current ||
 			closingGenerationRef.current !== null ||
 			activeGenerationRef.current !== null ||
-			scribe.getConnection()
+			currentScribe.getConnection()
 		) {
 			return false;
 		}
@@ -222,9 +298,11 @@ export function useRealtimeConnection({
 		generationRef.current = generation;
 		activeGenerationRef.current = generation;
 		failedGenerationRef.current = null;
+
 		const readiness = new Promise<void>((resolve, reject) => {
 			const timeoutId = window.setTimeout(() => {
 				const waiter = connectionReadyWaiterRef.current;
+
 				if (!waiter || waiter.generation !== generation) return;
 				connectionReadyWaiterRef.current = null;
 				reject(
@@ -233,6 +311,7 @@ export function useRealtimeConnection({
 					}),
 				);
 			}, CONNECTION_READY_TIMEOUT_MS);
+
 			connectionReadyWaiterRef.current = {
 				generation,
 				resolve,
@@ -240,19 +319,24 @@ export function useRealtimeConnection({
 				timeoutId,
 			};
 		});
+
 		try {
 			const { token } = await getScribeToken({});
+
 			if (!mountedRef.current || activeGenerationRef.current !== generation) {
 				const waiter = connectionReadyWaiterRef.current;
+
 				if (waiter?.generation === generation) {
 					connectionReadyWaiterRef.current = null;
 					window.clearTimeout(waiter.timeoutId);
 					waiter.resolve();
 				}
+
 				return false;
 			}
+
 			try {
-				await scribe.connect({
+				await currentScribe.connect({
 					token,
 					microphone: {
 						echoCancellation: true,
@@ -261,68 +345,88 @@ export function useRealtimeConnection({
 						deviceId,
 					},
 				});
-			} catch (error) {
-				const microphoneError = classifyMicrophoneError(error);
+			} catch (cause) {
+				const microphoneError = classifyMicrophoneError(cause);
 				throw new RealtimeTranscriptionError({
 					message: microphoneError.message,
 				});
 			}
+
 			if (!mountedRef.current || activeGenerationRef.current !== generation) {
 				const waiter = connectionReadyWaiterRef.current;
+
 				if (waiter?.generation === generation) {
 					connectionReadyWaiterRef.current = null;
 					window.clearTimeout(waiter.timeoutId);
 					waiter.resolve();
 				}
+
 				if (activeGenerationRef.current === generation) {
 					activeGenerationRef.current = null;
 				}
+
 				closingGenerationRef.current = generation;
-				scribe.getConnection()?.close();
+				currentScribe.getConnection()?.close();
+
 				return false;
 			}
+
 			await readiness;
+
 			return generation;
 		} catch (error) {
 			const waiter = connectionReadyWaiterRef.current;
+
 			if (waiter?.generation === generation) {
 				connectionReadyWaiterRef.current = null;
 				window.clearTimeout(waiter.timeoutId);
 				waiter.resolve();
 			}
+
 			if (activeGenerationRef.current === generation) {
 				activeGenerationRef.current = null;
 			}
-			if (scribe.getConnection()) {
+
+			if (currentScribe.getConnection()) {
 				closingGenerationRef.current = generation;
-				scribe.disconnect();
-				scribe.clearTranscripts();
+				currentScribe.disconnect();
+				currentScribe.clearTranscripts();
 			}
+
 			throw error;
 		}
-	}, [deviceId, getScribeToken, scribe]);
+	}, [deviceId, getScribeToken]);
 
 	const disconnect = useCallback((): Promise<void> => {
-		if (!scribe.getConnection()) {
+		const currentScribe = scribeRef.current;
+
+		if (!currentScribe.getConnection()) {
 			activeGenerationRef.current = null;
+
 			return Promise.resolve();
 		}
 
 		const generation = activeGenerationRef.current;
+
 		if (generation === null) {
 			closingGenerationRef.current = generationRef.current;
-			scribe.disconnect();
-			scribe.clearTranscripts();
+			currentScribe.disconnect();
+			currentScribe.clearTranscripts();
+
 			return Promise.resolve();
 		}
+
 		const promise = new Promise<void>((resolve, reject) => {
 			const timeoutId = window.setTimeout(() => {
 				const waiter = disconnectWaiterRef.current;
+
 				if (!waiter || waiter.generation !== generation) return;
 				disconnectWaiterRef.current = null;
+
 				if (activeGenerationRef.current === generation) {
 					activeGenerationRef.current = null;
 				}
+
 				reject(
 					new DisconnectTimeout({
 						message:
@@ -330,6 +434,7 @@ export function useRealtimeConnection({
 					}),
 				);
 			}, DISCONNECT_TIMEOUT_MS);
+
 			disconnectWaiterRef.current = {
 				resolve,
 				reject,
@@ -337,11 +442,13 @@ export function useRealtimeConnection({
 				timeoutId,
 			};
 		});
+
 		closingGenerationRef.current = generation;
-		scribe.disconnect();
-		scribe.clearTranscripts();
+		currentScribe.disconnect();
+		currentScribe.clearTranscripts();
+
 		return promise;
-	}, [scribe]);
+	}, []);
 
 	return {
 		status: scribe.status,
@@ -350,4 +457,75 @@ export function useRealtimeConnection({
 		connect,
 		disconnect,
 	};
+}
+
+export function useLiveRealtimeConnection({
+	sessionId,
+	deviceId,
+	onCommit,
+	onError,
+}: {
+	sessionId: Id<"sessions"> | undefined;
+	deviceId: string;
+	onCommit?: (event: CaptureEvent) => void;
+	onError?: (message: string) => void;
+}) {
+	const handlersRef = useRef(idleScribeHandlers);
+
+	const scribe = useScribe({
+		modelId: "scribe_v2_realtime",
+		commitStrategy: CommitStrategy.VAD,
+		// SDK rejects <= 0.3 (exclusive); docs claim "between 0.3 and 3.0".
+		vadSilenceThresholdSecs: 0.31,
+		vadThreshold: 0.3,
+		includeLanguageDetection: true,
+		audioFormat: AudioFormat.PCM_16000,
+		microphone: {
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true,
+		},
+		onPartialTranscript: (data) =>
+			handlersRef.current.onPartialTranscript(data),
+		onCommittedTranscriptWithTimestamps: (data) =>
+			handlersRef.current.onCommittedTranscriptWithTimestamps(data),
+		onError: (error) => handlersRef.current.onError(error),
+		onAuthError: (data) => handlersRef.current.onAuthError(data),
+		onQuotaExceededError: (data) =>
+			handlersRef.current.onQuotaExceededError(data),
+		onCommitThrottledError: (data) =>
+			handlersRef.current.onCommitThrottledError(data),
+		onTranscriberError: (data) => handlersRef.current.onTranscriberError(data),
+		onUnacceptedTermsError: (data) =>
+			handlersRef.current.onUnacceptedTermsError(data),
+		onRateLimitedError: (data) => handlersRef.current.onRateLimitedError(data),
+		onInputError: (data) => handlersRef.current.onInputError(data),
+		onQueueOverflowError: (data) =>
+			handlersRef.current.onQueueOverflowError(data),
+		onResourceExhaustedError: (data) =>
+			handlersRef.current.onResourceExhaustedError(data),
+		onSessionTimeLimitExceededError: (data) =>
+			handlersRef.current.onSessionTimeLimitExceededError(data),
+		onChunkSizeExceededError: (data) =>
+			handlersRef.current.onChunkSizeExceededError(data),
+		onInsufficientAudioActivityError: (data) =>
+			handlersRef.current.onInsufficientAudioActivityError(data),
+		onConnect: () => handlersRef.current.onConnect(),
+		onSessionStarted: () => handlersRef.current.onSessionStarted(),
+		onDisconnect: () => handlersRef.current.onDisconnect(),
+	});
+
+	const getScribeToken = useAction(api.scribe.getScribeToken);
+
+	return useRealtimeConnection({
+		sessionId,
+		deviceId,
+		onCommit,
+		onError,
+		getScribeToken,
+		scribe,
+		registerHandlers: (handlers) => {
+			handlersRef.current = handlers;
+		},
+	});
 }

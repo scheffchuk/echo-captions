@@ -14,6 +14,7 @@ const modules = import.meta.glob("./**/*.ts");
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+
 	return t;
 }
 
@@ -68,8 +69,10 @@ async function completeAcceptedCommit(
 			)
 			.unique(),
 	);
+
 	if (!target?.workId)
 		throw new Error("Expected one queued translation target");
+	// SAFETY: persisted work ids are workpool ids written by the caption dispatcher.
 	await operator.mutation(internal.captions.targetCompleted, {
 		workId: target.workId as WorkId,
 		context: { acceptedCommitId },
@@ -103,6 +106,7 @@ describe("Broadcast lifecycle", () => {
 			results.filter((result) => result.status === "fulfilled"),
 		).toHaveLength(1);
 		const successful = results.find((result) => result.status === "fulfilled");
+
 		if (successful?.status !== "fulfilled") {
 			throw new Error("Expected one successful Broadcast start");
 		}
@@ -136,6 +140,7 @@ describe("Broadcast lifecycle", () => {
 	it("uses the server-known ordinal when stopping without a client ordinal", async () => {
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
@@ -155,12 +160,15 @@ describe("Broadcast lifecycle", () => {
 	it("records heartbeats without changing Session activity", async () => {
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		const before = await t.run(async (ctx) => {
 			const session = await ctx.db.get("sessions", sessionId);
 			const broadcast = await ctx.db.get("broadcasts", started.broadcastId);
+
 			return {
 				lastActivityAt: session?.lastActivityAt,
 				lastHeartbeatAt: broadcast?.lastHeartbeatAt,
@@ -174,6 +182,7 @@ describe("Broadcast lifecycle", () => {
 		const after = await t.run(async (ctx) => {
 			const session = await ctx.db.get("sessions", sessionId);
 			const broadcast = await ctx.db.get("broadcasts", started.broadcastId);
+
 			return {
 				lastActivityAt: session?.lastActivityAt,
 				lastHeartbeatAt: broadcast?.lastHeartbeatAt,
@@ -218,6 +227,7 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
@@ -248,9 +258,11 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId: started.broadcastId,
@@ -287,6 +299,7 @@ describe("Broadcast lifecycle", () => {
 		const resumed = await operator.mutation(api.broadcasts.resume, {
 			broadcastId: started.broadcastId,
 		});
+
 		expect(resumed).toMatchObject({
 			broadcastId: started.broadcastId,
 			sequence: 1,
@@ -302,6 +315,7 @@ describe("Broadcast lifecycle", () => {
 			sourceText: "Second",
 			sourceLanguage: "en",
 		});
+
 		expect(secondCommit).toMatchObject({
 			commitId: "recovery-commit-2",
 			status: "translated",
@@ -312,9 +326,11 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId: started.broadcastId,
@@ -333,6 +349,7 @@ describe("Broadcast lifecycle", () => {
 		const abandoned = await operator.mutation(api.broadcasts.abandon, {
 			broadcastId: started.broadcastId,
 		});
+
 		expect(abandoned).toMatchObject({
 			broadcastId: started.broadcastId,
 			sequence: 1,
@@ -354,12 +371,15 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		await t.run((ctx) =>
 			ctx.db.patch(sessionId, { audienceLanguages: ["en", "ja"] }),
 		);
+
 		const pending = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId: started.broadcastId,
@@ -373,9 +393,11 @@ describe("Broadcast lifecycle", () => {
 		await operator.mutation(internal.broadcasts.markLost, {
 			broadcastId: started.broadcastId,
 		});
+
 		const abandoned = await operator.mutation(api.broadcasts.abandon, {
 			broadcastId: started.broadcastId,
 		});
+
 		expect(abandoned).toMatchObject({
 			status: "stopping",
 			lastCommitOrdinal: 1,
@@ -394,6 +416,7 @@ describe("Broadcast lifecycle", () => {
 	it("rejects abandoning a Broadcast that is already stopping", async () => {
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
@@ -425,14 +448,17 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator } = await seedOperator(t);
+
 		const created = await operator.mutation(api.sessions.create, {
 			title: "Reserved slug event",
 			spokenLanguages: ["en"],
 			audienceLanguagesExtra: ["ja"],
 		});
+
 		const session = await operator.query(api.sessions.getMineBySlug, {
 			slug: created.slug,
 		});
+
 		if (!session) throw new Error("Expected created Session");
 
 		const reservationBeforeDelete = await t.run(async (ctx) =>
@@ -441,6 +467,7 @@ describe("Broadcast lifecycle", () => {
 				.withIndex("by_slug", (q) => q.eq("slug", created.slug))
 				.unique(),
 		);
+
 		expect(reservationBeforeDelete?.slug).toBe(created.slug);
 
 		await operator.mutation(api.sessions.deleteSession, {
@@ -459,6 +486,7 @@ describe("Broadcast lifecycle", () => {
 				.withIndex("by_slug", (q) => q.eq("slug", created.slug))
 				.unique(),
 		);
+
 		expect(reservationAfterDelete?.slug).toBe(created.slug);
 	});
 
@@ -466,9 +494,11 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		vi.advanceTimersByTime(20_000);
 		await t.finishInProgressScheduledFunctions();
 
@@ -491,6 +521,7 @@ describe("Broadcast lifecycle", () => {
 		vi.useFakeTimers();
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const results = await Promise.allSettled([
 			operator.mutation(api.broadcasts.start, { sessionId }),
 			operator.mutation(api.sessions.deleteSession, { sessionId }),
@@ -500,6 +531,7 @@ describe("Broadcast lifecycle", () => {
 			results.filter((result) => result.status === "fulfilled"),
 		).toHaveLength(1);
 		const session = await t.run((ctx) => ctx.db.get("sessions", sessionId));
+
 		const broadcast = await t.run(async (ctx) =>
 			ctx.db
 				.query("broadcasts")
@@ -508,6 +540,7 @@ describe("Broadcast lifecycle", () => {
 				)
 				.first(),
 		);
+
 		const deletionCommitted = session?.deletionRequestedAt !== undefined;
 		const broadcastStarted = broadcast?.status === "active";
 		expect(deletionCommitted !== broadcastStarted).toBe(true);
@@ -516,12 +549,15 @@ describe("Broadcast lifecycle", () => {
 	it("stops idempotently and seals only after the final ordinal is drained", async () => {
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		await t.run((ctx) =>
 			ctx.db.patch(sessionId, { audienceLanguages: ["en", "ja"] }),
 		);
+
 		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId: started.broadcastId,
@@ -535,6 +571,7 @@ describe("Broadcast lifecycle", () => {
 			broadcastId: started.broadcastId,
 			finalCommitOrdinal: 1,
 		});
+
 		expect(waiting).toMatchObject({
 			broadcastId: started.broadcastId,
 			status: "stopping",
@@ -557,6 +594,7 @@ describe("Broadcast lifecycle", () => {
 			broadcastId: started.broadcastId,
 			finalCommitOrdinal: 1,
 		});
+
 		expect(sealed).toMatchObject({
 			broadcastId: started.broadcastId,
 			status: "sealed",
@@ -567,6 +605,7 @@ describe("Broadcast lifecycle", () => {
 			broadcastId: started.broadcastId,
 			finalCommitOrdinal: 1,
 		});
+
 		expect(duplicate).toEqual(sealed);
 
 		await expect(
@@ -577,9 +616,11 @@ describe("Broadcast lifecycle", () => {
 	it("orders accepted commits within the active Broadcast and seals after finalization", async () => {
 		const t = makeTest();
 		const { operator, sessionId } = await seedOperator(t);
+
 		const started = await operator.mutation(api.broadcasts.start, {
 			sessionId,
 		});
+
 		await t.run((ctx) =>
 			ctx.db.patch(sessionId, { audienceLanguages: ["en", "ja"] }),
 		);
@@ -603,6 +644,7 @@ describe("Broadcast lifecycle", () => {
 			sourceText: "Hello",
 			sourceLanguage: "en",
 		});
+
 		expect(accepted).toMatchObject({
 			commitId: "commit-1",
 			status: "pending",
@@ -620,6 +662,7 @@ describe("Broadcast lifecycle", () => {
 		const broadcast = await t.run((ctx) =>
 			ctx.db.get("broadcasts", started.broadcastId),
 		);
+
 		expect(broadcast?.status).toBe("sealed");
 	});
 });

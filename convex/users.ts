@@ -15,6 +15,7 @@ export const accountState = query({
 	}),
 	handler: async (ctx) => {
 		const hasAccount = await hasStoredAccount(ctx);
+
 		return {
 			hasAccount,
 			signupAllowed: isSignupAllowed(
@@ -47,9 +48,12 @@ export const me = query({
 	returns: v.union(v.object({ email: v.string() }), v.null()),
 	handler: async (ctx) => {
 		const userId = await getCurrentOperatorId(ctx);
+
 		if (!userId) return null;
 		const user = await ctx.db.get("users", userId);
+
 		if (!user?.email) return null;
+
 		return { email: user.email };
 	},
 });
