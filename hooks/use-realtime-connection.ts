@@ -263,10 +263,15 @@ export function useRealtimeConnection({
 	scribeRef.current = scribe;
 	useEffect(() => {
 		mountedRef.current = true;
+		closingGenerationRef.current = null;
 
 		return () => {
 			mountedRef.current = false;
-			closingGenerationRef.current = generationRef.current;
+
+			if (activeGenerationRef.current !== null) {
+				closingGenerationRef.current = activeGenerationRef.current;
+			}
+
 			activeGenerationRef.current = null;
 			const waiter = connectionReadyWaiterRef.current;
 

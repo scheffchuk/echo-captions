@@ -621,6 +621,40 @@ describe("Broadcast coordinator", () => {
 		coordinator.dispose();
 	});
 
+	it("resumes heartbeats and caption acceptance after a development remount", async () => {
+		let heartbeat!: () => void;
+
+		const adapters = makeAdapters();
+
+		const coordinator = createBroadcastCoordinator({
+			timers: {
+				setInterval: vi.fn((callback) => {
+					heartbeat = callback;
+
+					return 1;
+				}),
+				clearInterval: vi.fn(),
+			},
+		});
+
+		configureCoordinator(coordinator, "session-remount", adapters);
+		coordinator.dispose();
+		configureCoordinator(coordinator, "session-remount", adapters);
+		await coordinator.run({ kind: "start" });
+		expect(adapters.heartbeat).toHaveBeenCalledOnce();
+		heartbeat();
+		await settle();
+
+		expect(adapters.heartbeat).toHaveBeenCalledTimes(2);
+		coordinator.offerCapture(capture("commit-after-remount"));
+		await vi.waitFor(() =>
+			expect(adapters.acceptCommit).toHaveBeenCalledWith(
+				expect.objectContaining({ commitId: "commit-after-remount" }),
+			),
+		);
+		coordinator.dispose();
+	});
+
 	it("rejects duplicate commands through the coordinator seam", async () => {
 		const starting = deferred<number>();
 

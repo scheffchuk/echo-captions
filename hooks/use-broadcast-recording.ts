@@ -1,11 +1,14 @@
 "use client";
 
 import { useMutation } from "convex/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { CaptureEvent } from "@/hooks/broadcast-capture";
 import {
+	type BroadcastActivation,
+	type BroadcastCommitInput,
+	type BroadcastCoordinatorAdapters,
 	type BroadcastCoordinatorSnapshot,
 	type BroadcastLifecycleStatus,
 	createBroadcastCoordinator,
@@ -16,6 +19,57 @@ import { useLiveRealtimeConnection } from "@/hooks/use-realtime-connection";
 export type BroadcastVoiceState = "idle" | "connecting" | "recording";
 
 export type { BroadcastLifecycleStatus } from "@/hooks/broadcast-coordinator";
+
+type BroadcastRecordingBindings<AcceptResult> = {
+	sessionId: Id<"sessions"> | undefined;
+	recoverableBroadcastId: Id<"broadcasts"> | null | undefined;
+	onError: ((message: string) => void) | undefined;
+	connect: BroadcastCoordinatorAdapters["connect"];
+	disconnect: BroadcastCoordinatorAdapters["disconnect"];
+	startBroadcast: (args: {
+		sessionId: Id<"sessions">;
+	}) => Promise<BroadcastActivation>;
+	resumeBroadcast: (args: {
+		broadcastId: Id<"broadcasts">;
+	}) => Promise<BroadcastActivation>;
+	heartbeat: (args: { broadcastId: Id<"broadcasts"> }) => Promise<null>;
+	stopBroadcast: (args: {
+		broadcastId: Id<"broadcasts">;
+	}) => Promise<BroadcastActivation>;
+	acceptCommit: (args: BroadcastCommitInput) => Promise<AcceptResult>;
+};
+
+function applyBroadcastRecording<AcceptResult>(
+	coordinator: ReturnType<typeof createBroadcastCoordinator>,
+	recording: BroadcastRecordingBindings<AcceptResult>,
+) {
+	coordinator.update({
+		sessionId: recording.sessionId,
+		recoverableBroadcastId: recording.recoverableBroadcastId,
+		onError: recording.onError,
+		adapters: {
+			connect: recording.connect,
+			disconnect: recording.disconnect,
+			start: (nextSessionId) =>
+				recording.startBroadcast({ sessionId: nextSessionId }),
+			resume: (broadcastId) => recording.resumeBroadcast({ broadcastId }),
+			heartbeat: async (broadcastId) => {
+				await recording.heartbeat({ broadcastId });
+			},
+			stop: ({ broadcastId }) => recording.stopBroadcast({ broadcastId }),
+			acceptCommit: async (args) => {
+				await recording.acceptCommit({
+					sessionId: args.sessionId,
+					broadcastId: args.broadcastId,
+					commitOrdinal: args.commitOrdinal,
+					commitId: args.commitId,
+					sourceText: args.sourceText,
+					sourceLanguage: args.sourceLanguage,
+				});
+			},
+		},
+	});
+}
 
 const emptyCoordinatorSnapshot: BroadcastCoordinatorSnapshot = {
 	activeBroadcastId: null,
@@ -48,54 +102,86 @@ export function useBroadcastRecording({
 		emptyCoordinatorSnapshot,
 	);
 
-	const [coordinator] = useState(() =>
-		createBroadcastCoordinator({
-			onSnapshot: setCoordinatorSnapshot,
-			rejectedCaptureOwner,
-		}),
-	);
+	const coordinatorRef = useRef<ReturnType<
+		typeof createBroadcastCoordinator
+	> | null>(null);
 
-	const offerCapture = useCallback(
-		(event: CaptureEvent) => coordinator.offerCapture(event),
-		[coordinator],
-	);
+	const offerCapture = useCallback((event: CaptureEvent) => {
+		coordinatorRef.current?.offerCapture(event);
+	}, []);
+
+	const reportRealtimeError = useCallback((message: string) => {
+		coordinatorRef.current?.handleRealtimeError(message);
+	}, []);
 
 	const realtime = useLiveRealtimeConnection({
 		sessionId,
 		deviceId,
 		onCommit: offerCapture,
-		onError: coordinator.handleRealtimeError,
+		onError: reportRealtimeError,
 	});
 
+	const recordingRef = useRef({
+		sessionId,
+		recoverableBroadcastId,
+		onError,
+		connect: realtime.connect,
+		disconnect: realtime.disconnect,
+		startBroadcast,
+		resumeBroadcast,
+		heartbeat,
+		stopBroadcast,
+		acceptCommit,
+	});
+
+	recordingRef.current = {
+		sessionId,
+		recoverableBroadcastId,
+		onError,
+		connect: realtime.connect,
+		disconnect: realtime.disconnect,
+		startBroadcast,
+		resumeBroadcast,
+		heartbeat,
+		stopBroadcast,
+		acceptCommit,
+	};
+
 	useEffect(() => {
-		coordinator.update({
+		const coordinator = createBroadcastCoordinator({
+			onSnapshot: setCoordinatorSnapshot,
+			rejectedCaptureOwner,
+		});
+
+		coordinatorRef.current = coordinator;
+		applyBroadcastRecording(coordinator, recordingRef.current);
+
+		return () => {
+			coordinator.dispose();
+
+			if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+		};
+	}, [rejectedCaptureOwner]);
+
+	useEffect(() => {
+		const coordinator = coordinatorRef.current;
+
+		if (!coordinator) return;
+
+		applyBroadcastRecording(coordinator, {
 			sessionId,
 			recoverableBroadcastId,
 			onError,
-			adapters: {
-				connect: realtime.connect,
-				disconnect: realtime.disconnect,
-				start: (nextSessionId) => startBroadcast({ sessionId: nextSessionId }),
-				resume: (broadcastId) => resumeBroadcast({ broadcastId }),
-				heartbeat: async (broadcastId) => {
-					await heartbeat({ broadcastId });
-				},
-				stop: ({ broadcastId }) => stopBroadcast({ broadcastId }),
-				acceptCommit: async (args) => {
-					await acceptCommit({
-						sessionId: args.sessionId,
-						broadcastId: args.broadcastId,
-						commitOrdinal: args.commitOrdinal,
-						commitId: args.commitId,
-						sourceText: args.sourceText,
-						sourceLanguage: args.sourceLanguage,
-					});
-				},
-			},
+			connect: realtime.connect,
+			disconnect: realtime.disconnect,
+			startBroadcast,
+			resumeBroadcast,
+			heartbeat,
+			stopBroadcast,
+			acceptCommit,
 		});
 	}, [
 		acceptCommit,
-		coordinator,
 		heartbeat,
 		onError,
 		recoverableBroadcastId,
@@ -108,15 +194,18 @@ export function useBroadcastRecording({
 	]);
 
 	useEffect(() => {
-		window.addEventListener("pagehide", coordinator.handlePagehide);
+		const onPagehide = () => coordinatorRef.current?.handlePagehide();
 
-		return () =>
-			window.removeEventListener("pagehide", coordinator.handlePagehide);
-	}, [coordinator]);
+		window.addEventListener("pagehide", onPagehide);
 
-	useEffect(() => () => coordinator.dispose(), [coordinator]);
+		return () => window.removeEventListener("pagehide", onPagehide);
+	}, []);
 
 	const toggleRecording = useCallback(() => {
+		const coordinator = coordinatorRef.current;
+
+		if (!coordinator) return Promise.resolve();
+
 		const shouldStart = broadcastStatus === "lost";
 
 		const shouldStop =
@@ -125,16 +214,16 @@ export function useBroadcastRecording({
 				coordinator.snapshot().activeBroadcastId !== null);
 
 		return coordinator.run({ kind: shouldStop ? "stop" : "start" });
-	}, [broadcastStatus, coordinator, realtime.isConnected]);
+	}, [broadcastStatus, realtime.isConnected]);
 
 	const abandonRecording = useCallback(
-		() => coordinator.abandon(),
-		[coordinator],
+		() => coordinatorRef.current?.abandon(),
+		[],
 	);
 
 	const clearRejectedCaptures = useCallback(
-		() => coordinator.clearRejectedCaptures(),
-		[coordinator],
+		() => coordinatorRef.current?.clearRejectedCaptures(),
+		[],
 	);
 
 	const voiceState: BroadcastVoiceState =

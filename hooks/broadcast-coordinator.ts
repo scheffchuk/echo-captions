@@ -161,11 +161,16 @@ export function createBroadcastCoordinator({
 		onSnapshot?.(snapshot);
 	};
 
-	unsubscribeRejectedCaptureOwner = rejectedCaptureOwner.subscribe(
-		(changedSessionId) => {
-			if (!disposed && changedSessionId === sessionId) emit();
-		},
-	);
+	const subscribeRejectedCaptures = () => {
+		unsubscribeRejectedCaptureOwner();
+		unsubscribeRejectedCaptureOwner = rejectedCaptureOwner.subscribe(
+			(changedSessionId) => {
+				if (!disposed && changedSessionId === sessionId) emit();
+			},
+		);
+	};
+
+	subscribeRejectedCaptures();
 
 	const updateHeartbeat = () => {
 		const activeBroadcastId = getActiveBroadcastId();
@@ -180,21 +185,25 @@ export function createBroadcastCoordinator({
 
 		if (shouldHeartbeat && heartbeatTimer === null) {
 			heartbeatFailureReported = false;
-			heartbeatTimer = timers.setInterval(() => {
-				const activeBroadcastId =
+
+			const sendHeartbeat = () => {
+				const currentBroadcastId =
 					lifecycle.tag === "active" ? lifecycle.activation.broadcastId : null;
 
 				const currentAdapters = adapters;
 
-				if (!activeBroadcastId || !currentAdapters) return;
-				void currentAdapters.heartbeat(activeBroadcastId).catch((error) => {
+				if (!currentBroadcastId || !currentAdapters) return;
+				void currentAdapters.heartbeat(currentBroadcastId).catch((error) => {
 					const failure = toBroadcastCommandError(error);
 
 					if (heartbeatFailureReported) return;
 					heartbeatFailureReported = true;
 					reportError?.(failure.message);
 				});
-			}, HEARTBEAT_INTERVAL_MS);
+			};
+
+			heartbeatTimer = timers.setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+			sendHeartbeat();
 		}
 	};
 
@@ -204,11 +213,16 @@ export function createBroadcastCoordinator({
 		adapters: BroadcastCoordinatorAdapters;
 		onError?: (message: string) => void;
 	}) => {
+		const reviving = disposed;
+
+		disposed = false;
 		sessionId = input.sessionId;
 		recoverableBroadcastId = input.recoverableBroadcastId;
 		adapters = input.adapters;
 
 		if ("onError" in input) reportError = input.onError;
+
+		if (reviving) subscribeRejectedCaptures();
 		updateHeartbeat();
 		emit();
 	};
