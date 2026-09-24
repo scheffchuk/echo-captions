@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-28)
+Accepted (2026-08-28); amended 2026-09-21
 
 ## Context
 
@@ -41,3 +41,12 @@ The application deliberately wants broad Effect use, including the browser, but 
 - Browser coordination is concentrated at the imperative ElevenLabs and Convex seams, and duplicated optimistic source-text reconciliation is gone.
 - Effect v4 reactivity remains an unstable prerelease interface, so exact lockstep upgrades and focused integration tests are required.
 - Tests run effects directly with controlled layers, registry instances, `TestClock`, and deterministic fibers. Focused React tests verify router registry ownership, Strict Mode behavior, and media/listener cleanup. Convex codegen, type checking, deployment build, JWT signing, Scribe token acquisition, and provider HTTP tests verify default-runtime compatibility.
+
+## Amendment (2026-09-21)
+
+The browser Effect registry was removed (commit `d5e1101`). This supersedes the `@effect/atom-react` pin in decision 1, the `RegistryProvider` in decision 9, the single registry in decision 10, the `AsyncResult` in decision 12, and the registry storage in decision 16.
+
+- `@effect/atom-react` is not a dependency. TanStack Router's `Wrap` places `RejectedCaptureOwnerProvider` beside `ConvexAuthProvider`.
+- Rejected captures live in that provider's owner for the lifetime of the rendered tree. They are still not durably journaled.
+- Browser voice state derives from ElevenLabs status, Convex subscriptions, and the Broadcast coordinator's serialized command result.
+- Microphone enumeration still uses Effect and Stream in `hooks/microphone-devices.ts`. The mic selector owns its lifecycle.
