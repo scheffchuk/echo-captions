@@ -660,7 +660,6 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 											<AddLanguageButton
 												disabledCodes={spoken}
 												disabled={spoken.length >= MAX_SPOKEN_LANGUAGES}
-												persistOnSelect
 												onAdd={(code) =>
 													spokenField.handleChange([...spoken, code])
 												}
@@ -716,7 +715,6 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 											<div className="flex flex-wrap items-center gap-2">
 												<AddLanguageButton
 													disabledCodes={[...spoken, ...extra]}
-													persistOnSelect
 													onAdd={addExtra}
 												/>
 												{extra.map((code) => (
@@ -813,22 +811,18 @@ function LanguageChips({
 function AddLanguageButton({
 	disabledCodes,
 	onAdd,
-	persistOnSelect = false,
 	disabled = false,
 }: {
 	disabledCodes: string[];
 	onAdd: (code: string) => void;
-	persistOnSelect?: boolean;
 	disabled?: boolean;
 }) {
-	const [open, setOpen] = useState(false);
-
 	const available = COMMON_LANGUAGES.filter(
 		(lang) => !disabledCodes.includes(lang.code),
 	);
 
 	return (
-		<Popover open={open} onOpenChange={setOpen} modal>
+		<Popover modal>
 			<PopoverTrigger asChild>
 				<Button
 					variant="outline"
@@ -850,11 +844,7 @@ function AddLanguageButton({
 								<CommandItem
 									key={lang.code}
 									value={lang.name}
-									onSelect={() => {
-										onAdd(lang.code);
-
-										if (!persistOnSelect) setOpen(false);
-									}}
+									onSelect={() => onAdd(lang.code)}
 								>
 									{lang.name}
 								</CommandItem>

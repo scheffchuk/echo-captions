@@ -78,7 +78,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const [abandoningBroadcast, setAbandoningBroadcast] = useState(false);
 
 	const audienceLanguages = session?.audienceLanguages ?? [];
-	const audienceKey = audienceLanguages.join(",");
 	const defaultSourceLanguage = session?.spokenLanguages[0] ?? "en";
 	const broadcastStatus = session?.activeBroadcast?.status;
 
@@ -92,9 +91,10 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		null,
 	);
 
-	const defaultLanguagePair = audienceKey
-		? resolveLanguagePair(slug, audienceKey.split(","))
-		: null;
+	const defaultLanguagePair =
+		audienceLanguages.length > 0
+			? resolveLanguagePair(slug, audienceLanguages)
+			: null;
 
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 

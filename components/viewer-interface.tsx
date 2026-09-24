@@ -24,7 +24,6 @@ import {
 export function ViewerInterface({ slug }: { slug: string }) {
 	const session = useQuery(api.sessions.getBySlug, { slug });
 	const audienceLanguages: string[] = session?.audienceLanguages ?? [];
-	const audienceKey = audienceLanguages.join(",");
 
 	const [userLanguagePair, setUserLanguagePair] = useState<LanguagePair | null>(
 		null,
@@ -32,9 +31,10 @@ export function ViewerInterface({ slug }: { slug: string }) {
 
 	const [textScale, setTextScale] = useState(() => getStoredTextSize());
 
-	const defaultLanguagePair = audienceKey
-		? resolveViewerLanguagePair(slug, audienceKey.split(","))
-		: null;
+	const defaultLanguagePair =
+		audienceLanguages.length > 0
+			? resolveViewerLanguagePair(slug, audienceLanguages)
+			: null;
 
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 

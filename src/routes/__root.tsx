@@ -5,8 +5,8 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { Analytics } from "@vercel/analytics/react";
+import { ThemeProvider } from "next-themes";
 import type { ReactNode } from "react";
-import { ThemeProvider } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import appCss from "../../app/globals.css?url";
