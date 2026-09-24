@@ -22,7 +22,7 @@ import {
 } from "effect/unstable/http";
 import * as jose from "jose";
 import { type DefaultTreeAdapterTypes, parseFragment } from "parse5";
-import { toGoogleCode } from "./languages";
+import { toGoogleCode } from "../../shared/languages";
 import {
 	MappingIntegrityError,
 	type TranslationDocument,

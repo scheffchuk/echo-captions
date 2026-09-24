@@ -1,8 +1,4 @@
-import { ConvexError, v } from "convex/values";
-import {
-	isTaggedPublicError,
-	publicErrorCode,
-} from "../shared/tagged-public-error";
+import { v } from "convex/values";
 import {
 	canonicalTranslationMappingsEqual,
 	filterMappingsForAudience,
@@ -12,7 +8,6 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
 	internalMutation,
-	internalQuery,
 	type MutationCtx,
 	mutation,
 	type QueryCtx,
@@ -34,6 +29,7 @@ import {
 	validateAudienceLanguagesExtra,
 	validateSpokenLanguages,
 } from "./lib/languages";
+import { atPublicEdge } from "./lib/publicEdge";
 import {
 	getOwnedSession,
 	InvalidSessionTransition,
@@ -80,9 +76,7 @@ const eventFields = {
 	translationMappings: v.optional(v.array(translationMappingValidator)),
 };
 
-const storedSessionValidator = sessionDocValidator;
-
-const sessionValidator = storedSessionValidator.extend({
+const sessionValidator = sessionDocValidator.extend({
 	translationMappings: v.array(translationMappingValidator),
 });
 
@@ -116,22 +110,6 @@ type EventFields = {
 	audienceLanguagesExtra?: string[];
 	translationMappings?: TranslationMapping[];
 };
-
-async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
-	try {
-		return await operation();
-	} catch (error) {
-		if (isTaggedPublicError(error)) {
-			const code = publicErrorCode(publicErrorCodes, error._tag);
-
-			if (code !== undefined) {
-				throw new ConvexError({ code, message: error.message });
-			}
-		}
-
-		throw error;
-	}
-}
 
 async function getCurrentMappingRevision(
 	ctx: MutationCtx,
@@ -606,7 +584,8 @@ export const create = mutation({
 		...eventFields,
 	},
 	returns: v.object({ slug: v.string() }),
-	handler: async (ctx, args) => atPublicEdge(() => createSession(ctx, args)),
+	handler: async (ctx, args) =>
+		atPublicEdge(publicErrorCodes, () => createSession(ctx, args)),
 });
 
 export const listMine = query({
@@ -666,13 +645,9 @@ export const updateDescription = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) =>
-		atPublicEdge(() => patchDescription(ctx, args.sessionId, args.description)),
-});
-
-export const getForAction = internalQuery({
-	args: { sessionId: v.id("sessions") },
-	returns: v.union(storedSessionValidator, v.null()),
-	handler: async (ctx, args) => ctx.db.get("sessions", args.sessionId),
+		atPublicEdge(publicErrorCodes, () =>
+			patchDescription(ctx, args.sessionId, args.description),
+		),
 });
 
 export const updateTranslationMappings = mutation({
@@ -686,7 +661,7 @@ export const updateTranslationMappings = mutation({
 		changed: v.boolean(),
 	}),
 	handler: async (ctx, args) =>
-		atPublicEdge(() => patchTranslationMappings(ctx, args)),
+		atPublicEdge(publicErrorCodes, () => patchTranslationMappings(ctx, args)),
 });
 
 export const updateLanguages = mutation({
@@ -696,7 +671,8 @@ export const updateLanguages = mutation({
 		audienceLanguagesExtra: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
-	handler: async (ctx, args) => atPublicEdge(() => patchLanguages(ctx, args)),
+	handler: async (ctx, args) =>
+		atPublicEdge(publicErrorCodes, () => patchLanguages(ctx, args)),
 });
 
 export const updateTitle = mutation({
@@ -706,7 +682,9 @@ export const updateTitle = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) =>
-		atPublicEdge(() => patchTitle(ctx, args.sessionId, args.title)),
+		atPublicEdge(publicErrorCodes, () =>
+			patchTitle(ctx, args.sessionId, args.title),
+		),
 });
 
 export const deleteSession = mutation({
@@ -715,7 +693,7 @@ export const deleteSession = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) =>
-		atPublicEdge(() => removeSession(ctx, args.sessionId)),
+		atPublicEdge(publicErrorCodes, () => removeSession(ctx, args.sessionId)),
 });
 
 export const deleteBatch = internalMutation({

@@ -1,8 +1,4 @@
-import { ConvexError, v } from "convex/values";
-import {
-	isTaggedPublicError,
-	publicErrorCode,
-} from "../shared/tagged-public-error";
+import { v } from "convex/values";
 import { internalMutation, mutation } from "./_generated/server";
 import { authErrorCodes } from "./lib/auth";
 import type { HeartbeatExpiryArgs } from "./lib/broadcasts";
@@ -15,6 +11,7 @@ import {
 	startBroadcast,
 	stopBroadcast,
 } from "./lib/broadcasts";
+import { atPublicEdge } from "./lib/publicEdge";
 import { sessionErrorCodes } from "./lib/sessions";
 import { broadcastStatusValidator } from "./schema";
 
@@ -23,22 +20,6 @@ const publicErrorCodes = {
 	...broadcastErrorCodes,
 	...sessionErrorCodes,
 };
-
-async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
-	try {
-		return await operation();
-	} catch (error) {
-		if (isTaggedPublicError(error)) {
-			const code = publicErrorCode(publicErrorCodes, error._tag);
-
-			if (code !== undefined) {
-				throw new ConvexError({ code, message: error.message });
-			}
-		}
-
-		throw error;
-	}
-}
 
 const broadcastResultValidator = v.object({
 	broadcastId: v.id("broadcasts"),
@@ -52,14 +33,14 @@ export const start = mutation({
 	args: { sessionId: v.id("sessions") },
 	returns: broadcastResultValidator,
 	handler: (ctx, args) =>
-		atPublicEdge(() => startBroadcast(ctx, args.sessionId)),
+		atPublicEdge(publicErrorCodes, () => startBroadcast(ctx, args.sessionId)),
 });
 
 export const heartbeat = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: v.null(),
 	handler: (ctx, args) =>
-		atPublicEdge(() => sendHeartbeat(ctx, args.broadcastId)),
+		atPublicEdge(publicErrorCodes, () => sendHeartbeat(ctx, args.broadcastId)),
 });
 
 export const stop = mutation({
@@ -68,21 +49,26 @@ export const stop = mutation({
 		finalCommitOrdinal: v.optional(v.number()),
 	},
 	returns: broadcastResultValidator,
-	handler: (ctx, args) => atPublicEdge(() => stopBroadcast(ctx, args)),
+	handler: (ctx, args) =>
+		atPublicEdge(publicErrorCodes, () => stopBroadcast(ctx, args)),
 });
 
 export const resume = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: broadcastResultValidator,
 	handler: (ctx, args) =>
-		atPublicEdge(() => resumeBroadcast(ctx, args.broadcastId)),
+		atPublicEdge(publicErrorCodes, () =>
+			resumeBroadcast(ctx, args.broadcastId),
+		),
 });
 
 export const abandon = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: broadcastResultValidator,
 	handler: (ctx, args) =>
-		atPublicEdge(() => abandonBroadcast(ctx, args.broadcastId)),
+		atPublicEdge(publicErrorCodes, () =>
+			abandonBroadcast(ctx, args.broadcastId),
+		),
 });
 
 export const markLost = internalMutation({

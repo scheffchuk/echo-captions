@@ -46,8 +46,6 @@ export const broadcastErrorCodes = {
 	InvalidCommitOrdinal: "invalid_commit_ordinal",
 } as const;
 
-export const BROADCAST_HEARTBEAT_INTERVAL_MS = 5_000;
-
 export const BROADCAST_HEARTBEAT_TIMEOUT_MS = 20_000;
 
 export const unresolvedBroadcastStatuses = [
@@ -55,8 +53,6 @@ export const unresolvedBroadcastStatuses = [
 	"lost",
 	"stopping",
 ] as const satisfies readonly BroadcastStatus[];
-
-const positiveCommitOrdinalSchema = Schema.Int.check(Schema.isGreaterThan(0));
 
 type BroadcastCtx = QueryCtx | MutationCtx;
 
@@ -287,23 +283,6 @@ async function getOwnedBroadcast(
 	return assertValidBroadcastState(broadcast);
 }
 
-export async function getUnresolvedBroadcast(
-	ctx: BroadcastCtx,
-	sessionId: Id<"sessions">,
-) {
-	return await readUnresolvedBroadcast(ctx, sessionId);
-}
-
-export async function getBroadcastProjection(
-	ctx: BroadcastCtx,
-	sessionId: Id<"sessions">,
-	audience: BroadcastProjectionAudience,
-) {
-	const broadcast = await getUnresolvedBroadcast(ctx, sessionId);
-
-	return projectBroadcast(broadcast, audience);
-}
-
 export function isBroadcastDrained(
 	broadcast: Pick<
 		Doc<"broadcasts">,
@@ -419,7 +398,7 @@ export async function startBroadcast(
 		throw new SessionDeleting({ message: "Session is being deleted" });
 	}
 
-	const unresolved = await getUnresolvedBroadcast(ctx, sessionId);
+	const unresolved = await readUnresolvedBroadcast(ctx, sessionId);
 
 	if (unresolved) {
 		throw new SessionBusy({
@@ -690,16 +669,6 @@ export function toBroadcastResult(
 		lastCommitOrdinal: broadcast.lastCommitOrdinal,
 		finalCommitOrdinal: broadcast.finalCommitOrdinal,
 	};
-}
-
-export function validateCommitOrdinal(value: number) {
-	try {
-		return Schema.decodeUnknownSync(positiveCommitOrdinalSchema)(value);
-	} catch {
-		throw new InvalidCommitOrdinal({
-			message: "Commit ordinal must be a positive integer",
-		});
-	}
 }
 
 export function validateFinalCommitOrdinal(value: number) {

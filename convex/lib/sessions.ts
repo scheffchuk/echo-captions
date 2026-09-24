@@ -48,7 +48,7 @@ export async function getOwnedSession(
 	return session;
 }
 
-export function generateSlug(): string {
+function generateSlug(): string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
 	let slug = "";
 

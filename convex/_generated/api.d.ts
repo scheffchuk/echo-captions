@@ -20,6 +20,7 @@ import type * as lib_captionRetry from "../lib/captionRetry.js";
 import type * as lib_captionWorkpool from "../lib/captionWorkpool.js";
 import type * as lib_googleTranslate from "../lib/googleTranslate.js";
 import type * as lib_languages from "../lib/languages.js";
+import type * as lib_publicEdge from "../lib/publicEdge.js";
 import type * as lib_scribeClient from "../lib/scribeClient.js";
 import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_signupPolicy from "../lib/signupPolicy.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/captionWorkpool": typeof lib_captionWorkpool;
   "lib/googleTranslate": typeof lib_googleTranslate;
   "lib/languages": typeof lib_languages;
+  "lib/publicEdge": typeof lib_publicEdge;
   "lib/scribeClient": typeof lib_scribeClient;
   "lib/sessions": typeof lib_sessions;
   "lib/signupPolicy": typeof lib_signupPolicy;

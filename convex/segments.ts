@@ -2,15 +2,12 @@ import {
 	paginationOptsValidator,
 	paginationResultValidator,
 } from "convex/server";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { Schema } from "effect";
-import {
-	isTaggedPublicError,
-	publicErrorCode,
-} from "../shared/tagged-public-error";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
 import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
+import { atPublicEdge } from "./lib/publicEdge";
 import {
 	getOwnedSession,
 	SessionDeleting,
@@ -31,22 +28,6 @@ const publicErrorCodes = {
 	...sessionErrorCodes,
 	TranscriptTooLarge: "transcript_too_large",
 };
-
-async function atPublicEdge<A>(operation: () => Promise<A>): Promise<A> {
-	try {
-		return await operation();
-	} catch (error) {
-		if (isTaggedPublicError(error)) {
-			const code = publicErrorCode(publicErrorCodes, error._tag);
-
-			if (code !== undefined) {
-				throw new ConvexError({ code, message: error.message });
-			}
-		}
-
-		throw error;
-	}
-}
 
 const segmentValidator = v.object({
 	_id: v.id("segments"),
@@ -145,7 +126,7 @@ export const transcriptText = query({
 	args: { sessionId: v.id("sessions") },
 	returns: v.string(),
 	handler: async (ctx, args) =>
-		atPublicEdge(() => readTranscriptText(ctx, args.sessionId)),
+		atPublicEdge(publicErrorCodes, () =>
+			readTranscriptText(ctx, args.sessionId),
+		),
 });
-
-export { segmentValidator };

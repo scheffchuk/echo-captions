@@ -522,24 +522,6 @@ async function toOperatorCommit(ctx: QueryCtx, commit: AcceptedCommit) {
 	return { ...operatorCommit, error };
 }
 
-export const getOperatorCommit = query({
-	args: { acceptedCommitId: v.id("acceptedCommits") },
-	returns: v.union(operatorCommitValidator, v.null()),
-	handler: async (ctx, args) => {
-		const operatorId = await getCurrentOperatorId(ctx);
-
-		if (!operatorId) return null;
-		const commit = await getAcceptedCommitById(ctx, args.acceptedCommitId);
-
-		if (!commit) return null;
-		const session = await ctx.db.get("sessions", commit.sessionId);
-
-		if (!session || session.ownerId !== operatorId) return null;
-
-		return await toOperatorCommit(ctx, commit);
-	},
-});
-
 export const listOperatorCommits = query({
 	args: {
 		sessionId: v.id("sessions"),

@@ -1,11 +1,3 @@
-export {
-	fromScribeCode,
-	isValidLanguageCode,
-	MAX_SPOKEN_LANGUAGES,
-	normalizeLanguageCode,
-	toGoogleCode,
-} from "../../shared/languages";
-
 import { Schema } from "effect";
 import {
 	fromScribeCode,

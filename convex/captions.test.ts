@@ -33,6 +33,19 @@ const workId = (value: string) => {
 	return value as WorkId;
 };
 
+async function readOperatorCommit(
+	operator: ReturnType<CaptionTest["withIdentity"]>,
+	sessionId: Id<"sessions">,
+	acceptedCommitId: Id<"acceptedCommits">,
+) {
+	const { page } = await operator.query(api.captions.listOperatorCommits, {
+		sessionId,
+		paginationOpts: { numItems: 100, cursor: null },
+	});
+
+	return page.find((commit) => commit.acceptedCommitId === acceptedCommitId);
+}
+
 async function seedCaptionBroadcast(
 	t: CaptionTest,
 	audienceLanguages = ["en", "ja", "de"],
@@ -234,9 +247,11 @@ describe("Convex-owned caption acceptance", () => {
 
 			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
-			const finished = await operator.query(api.captions.getOperatorCommit, {
-				acceptedCommitId: accepted.acceptedCommitId,
-			});
+			const finished = await readOperatorCommit(
+				operator,
+				sessionId,
+				accepted.acceptedCommitId,
+			);
 
 			expect(finished).toMatchObject({
 				status: "failed",
@@ -355,9 +370,11 @@ describe("Convex-owned caption acceptance", () => {
 			},
 		});
 
-		const partial = await operator.query(api.captions.getOperatorCommit, {
-			acceptedCommitId: accepted.acceptedCommitId,
-		});
+		const partial = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
 
 		expect(partial).toMatchObject({
 			status: "pending",
@@ -387,9 +404,11 @@ describe("Convex-owned caption acceptance", () => {
 			},
 		});
 
-		const finished = await operator.query(api.captions.getOperatorCommit, {
-			acceptedCommitId: accepted.acceptedCommitId,
-		});
+		const finished = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
 
 		expect(finished).toMatchObject({
 			status: "translated",
@@ -483,9 +502,11 @@ describe("Convex-owned caption acceptance", () => {
 			},
 		});
 
-		const commit = await operator.query(api.captions.getOperatorCommit, {
-			acceptedCommitId: accepted.acceptedCommitId,
-		});
+		const commit = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
 
 		expect(commit).toMatchObject({
 			status: "failed",
@@ -655,9 +676,11 @@ describe("Convex-owned caption acceptance", () => {
 		});
 		expect(retried.segmentId).toBe(failedSegment._id);
 
-		const pending = await operator.query(api.captions.getOperatorCommit, {
-			acceptedCommitId: accepted.acceptedCommitId,
-		});
+		const pending = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
 
 		expect(pending?.status).toBe("pending");
 		expect(
@@ -685,9 +708,11 @@ describe("Convex-owned caption acceptance", () => {
 			},
 		});
 
-		const recovered = await operator.query(api.captions.getOperatorCommit, {
-			acceptedCommitId: accepted.acceptedCommitId,
-		});
+		const recovered = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
 
 		expect(recovered).toMatchObject({
 			status: "translated",
