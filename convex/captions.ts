@@ -4,7 +4,7 @@ import {
 	paginationResultValidator,
 } from "convex/server";
 import { ConvexError, v } from "convex/values";
-import { Effect, Layer, ManagedRuntime, Random } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -22,11 +22,7 @@ import {
 	type TargetCompletion,
 } from "./lib/acceptedCommitTerminalization";
 import { getCurrentOperatorId } from "./lib/auth";
-import { captionTargetRetryDelay } from "./lib/captionRetry";
-import {
-	enqueueCaptionTargets,
-	scheduleRetryDispatch,
-} from "./lib/captionWorkpool";
+import { enqueueCaptionTargets } from "./lib/captionWorkpool";
 import { GoogleTranslate } from "./lib/googleTranslate";
 import {
 	computeTranslationTargets,
@@ -35,19 +31,13 @@ import {
 import { translationDocuments } from "./lib/translationMappings";
 import {
 	acceptedCommitStatusValidator,
-	acceptedCommitTargetPriorityValidator,
 	acceptedCommitTargetStatusValidator,
+	translationMappingValidator,
 } from "./schema";
 
 const MAX_COMMIT_ID_CHARS = 128;
 
 const MAX_SOURCE_TEXT_CHARS = 8_000;
-
-const MAX_EXPLICIT_RETRY_DELAY_MS = 1_000;
-
-const RETRY_DISPATCH_BATCH_SIZE = 32;
-
-const RETRY_DISPATCHING_WORK_ID = "retry-dispatching";
 
 const acceptedCommitReceiptValidator = v.object({
 	acceptedCommitId: v.id("acceptedCommits"),
@@ -93,47 +83,21 @@ const targetTranslationResultValidator = v.union(
 		targetLanguage: v.string(),
 		error: v.string(),
 	}),
-	v.object({
-		kind: v.literal("deferred"),
-		targetId: v.id("acceptedCommitTargets"),
-		targetLanguage: v.string(),
-		retryAfterMillis: v.optional(v.number()),
-	}),
 );
 
 const targetContextValidator = v.union(
 	v.object({
 		targetId: v.id("acceptedCommitTargets"),
-		acceptedCommitId: v.id("acceptedCommits"),
-		sessionId: v.id("sessions"),
 		targetLanguage: v.string(),
-		priority: acceptedCommitTargetPriorityValidator,
 		sourceText: v.string(),
 		sourceLanguage: v.string(),
-		translationMappingRevisionId: v.union(
-			v.id("translationMappingRevisions"),
-			v.null(),
-		),
 		status: acceptedCommitTargetStatusValidator,
-		providerAttemptCount: v.number(),
+		mappings: v.union(v.array(translationMappingValidator), v.null()),
 	}),
 	v.null(),
 );
 
 type AcceptedCommit = Doc<"acceptedCommits">;
-
-type TargetContext = {
-	targetId: Id<"acceptedCommitTargets">;
-	acceptedCommitId: Id<"acceptedCommits">;
-	sessionId: Id<"sessions">;
-	targetLanguage: string;
-	sourceText: string;
-	sourceLanguage: string;
-	priority: "live" | "retry";
-	translationMappingRevisionId: Id<"translationMappingRevisions"> | null;
-	status: "pending" | "translated" | "failed";
-	providerAttemptCount: number;
-} | null;
 
 const runtime = ManagedRuntime.make(
 	GoogleTranslate.layer.pipe(Layer.provide(convexConfigLayer)),
@@ -221,19 +185,6 @@ async function getAcceptedCommitById(
 	acceptedCommitId: Id<"acceptedCommits">,
 ) {
 	return await ctx.db.get("acceptedCommits", acceptedCommitId);
-}
-
-async function hasPendingLiveCaptionTargets(
-	ctx: QueryCtx | MutationCtx,
-): Promise<boolean> {
-	const target = await ctx.db
-		.query("acceptedCommitTargets")
-		.withIndex("by_priority_and_status", (q) =>
-			q.eq("priority", "live").eq("status", "pending"),
-		)
-		.first();
-
-	return target !== null;
 }
 
 async function acceptCommitInTransaction(
@@ -353,9 +304,7 @@ async function acceptCommitInTransaction(
 				acceptedCommitId,
 				sessionId: args.sessionId,
 				targetLanguage,
-				priority: "live",
 				status: "pending",
-				providerAttemptCount: 0,
 			}),
 		);
 	}
@@ -386,7 +335,7 @@ async function acceptCommitInTransaction(
 		return toReceipt(finished);
 	}
 
-	await enqueueCaptionTargets(ctx, acceptedCommitId, targetIds);
+	await enqueueCaptionTargets(ctx, "live", acceptedCommitId, targetIds);
 
 	return toReceipt(accepted);
 }
@@ -450,38 +399,29 @@ export const retryCommit = mutation({
 			);
 		}
 
+		const failedTargets = targets.filter(
+			(target) => target.status === "failed",
+		);
+
 		await Promise.all(
-			targets.map((target) =>
-				ctx.db.patch(target._id, {
-					priority: "retry",
-					status: "pending",
-					translation: undefined,
-					error: undefined,
-					workId: undefined,
-					providerAttemptCount: 0,
-				}),
+			failedTargets.map((target) =>
+				ctx.db.patch(target._id, { status: "pending", error: undefined }),
 			),
 		);
 		await ctx.db.patch(accepted._id, {
 			status: "pending",
-			completedTargetCount: 0,
 			failedTargetCount: 0,
 			error: undefined,
 		});
 		await ctx.db.patch(broadcast._id, {
 			pendingCommitCount: broadcast.pendingCommitCount + 1,
 		});
-
-		if (await hasPendingLiveCaptionTargets(ctx)) {
-			await scheduleRetryDispatch(ctx);
-		} else {
-			await enqueueCaptionTargets(
-				ctx,
-				accepted._id,
-				targets.map((target) => target._id),
-				MAX_EXPLICIT_RETRY_DELAY_MS,
-			);
-		}
+		await enqueueCaptionTargets(
+			ctx,
+			"retry",
+			accepted._id,
+			failedTargets.map((target) => target._id),
+		);
 
 		const retried = await getAcceptedCommitById(ctx, accepted._id);
 
@@ -548,12 +488,6 @@ export const listOperatorCommits = query({
 	},
 });
 
-export const hasPendingLiveTargets = internalQuery({
-	args: {},
-	returns: v.boolean(),
-	handler: (ctx) => hasPendingLiveCaptionTargets(ctx),
-});
-
 export const getTargetForAction = internalQuery({
 	args: { targetId: v.id("acceptedCommitTargets") },
 	returns: targetContextValidator,
@@ -565,279 +499,94 @@ export const getTargetForAction = internalQuery({
 
 		if (!commit || target.sessionId !== commit.sessionId) return null;
 
+		const revision = commit.translationMappingRevisionId
+			? await ctx.db.get(
+					"translationMappingRevisions",
+					commit.translationMappingRevisionId,
+				)
+			: null;
+
 		return {
 			targetId: target._id,
-			acceptedCommitId: commit._id,
-			sessionId: commit.sessionId,
 			targetLanguage: target.targetLanguage,
-			priority: target.priority,
 			sourceText: commit.sourceText,
 			sourceLanguage: commit.sourceLanguage,
-			translationMappingRevisionId: commit.translationMappingRevisionId ?? null,
 			status: target.status,
-			providerAttemptCount: target.providerAttemptCount ?? 0,
+			mappings: commit.translationMappingRevisionId
+				? (revision?.mappings ?? null)
+				: [],
 		};
 	},
 });
 
-function failedTargetResult(
-	targetId: Id<"acceptedCommitTargets">,
-	targetLanguage: string,
-	error: string,
-) {
-	return { kind: "failed" as const, targetId, targetLanguage, error };
-}
-
-function deferredTargetResult(
-	targetId: Id<"acceptedCommitTargets">,
-	targetLanguage: string,
-	retryAfterMillis?: number,
-) {
-	const deferred = {
-		kind: "deferred" as const,
-		targetId,
-		targetLanguage,
-	};
-
-	if (retryAfterMillis === undefined) return deferred;
-
-	return { ...deferred, retryAfterMillis };
-}
-
 export const translateTarget = internalAction({
 	args: { targetId: v.id("acceptedCommitTargets") },
 	returns: targetTranslationResultValidator,
-	handler: async (
-		ctx,
-		args,
-	): Promise<
-		| {
-				kind: "translated";
-				targetId: Id<"acceptedCommitTargets">;
-				targetLanguage: string;
-				translation: string;
-		  }
-		| {
-				kind: "failed";
-				targetId: Id<"acceptedCommitTargets">;
-				targetLanguage: string;
-				error: string;
-		  }
-		| {
-				kind: "deferred";
-				targetId: Id<"acceptedCommitTargets">;
-				targetLanguage: string;
-				retryAfterMillis?: number;
-		  }
-	> => {
-		const target: TargetContext = await ctx.runQuery(
+	handler: async (ctx, args): Promise<TargetCompletion> => {
+		const target = await ctx.runQuery(
 			internal.captions.getTargetForAction,
 			args,
 		);
 
 		if (!target) {
-			return failedTargetResult(
-				args.targetId,
-				"unknown",
-				"Translation target is unavailable",
-			);
+			return {
+				kind: "failed",
+				targetId: args.targetId,
+				targetLanguage: "unknown",
+				error: "Translation target is unavailable",
+			};
 		}
+
+		const fail = (error: string): TargetCompletion => ({
+			kind: "failed",
+			targetId: target.targetId,
+			targetLanguage: target.targetLanguage,
+			error,
+		});
 
 		if (target.status !== "pending") {
-			return failedTargetResult(
-				target.targetId,
-				target.targetLanguage,
-				"Translation target is no longer pending",
-			);
+			return fail("Translation target is no longer pending");
 		}
 
-		if (target.priority === "retry") {
-			const liveWorkPending: boolean = await ctx.runQuery(
-				internal.captions.hasPendingLiveTargets,
-				{},
-			);
-
-			if (liveWorkPending) {
-				return deferredTargetResult(target.targetId, target.targetLanguage);
-			}
+		if (!target.mappings) {
+			return fail("Translation mapping revision is unavailable");
 		}
 
-		let mappings: Doc<"translationMappingRevisions">["mappings"] = [];
+		const [document] = translationDocuments(
+			target.sourceText,
+			target.mappings,
+			[target.targetLanguage],
+		);
 
-		if (target.translationMappingRevisionId) {
-			const revision = await ctx.runQuery(
-				internal.mappingRevisions.getForAction,
-				{
-					revisionId: target.translationMappingRevisionId,
-				},
-			);
-
-			if (!revision) {
-				return failedTargetResult(
-					target.targetId,
-					target.targetLanguage,
-					"Translation mapping revision is unavailable",
-				);
-			}
-
-			mappings = revision.mappings;
-		}
-
-		const [document] = translationDocuments(target.sourceText, mappings, [
-			target.targetLanguage,
-		]);
-
-		if (!document) {
-			return failedTargetResult(
-				target.targetId,
-				target.targetLanguage,
-				"Translation document is unavailable",
-			);
-		}
+		if (!document) return fail("Translation document is unavailable");
 
 		const program = Effect.gen(function* () {
 			const google = yield* GoogleTranslate;
 
-			return yield* google.translateOne(document, target.sourceLanguage).pipe(
-				Effect.map((translation) => ({
-					kind: "translated" as const,
+			return yield* google.translateOne(document, target.sourceLanguage);
+		}).pipe(
+			Effect.map(
+				(translation): TargetCompletion => ({
+					kind: "translated",
 					targetId: target.targetId,
 					targetLanguage: target.targetLanguage,
 					translation,
-				})),
-				Effect.catchTags({
-					GoogleAuthenticationError: (error) =>
-						Effect.succeed(
-							failedTargetResult(
-								target.targetId,
-								target.targetLanguage,
-								error.message,
-							),
-						),
-					GoogleConfigError: (error) =>
-						Effect.succeed(
-							failedTargetResult(
-								target.targetId,
-								target.targetLanguage,
-								error.message,
-							),
-						),
-					GoogleRejectedError: (error) =>
-						Effect.succeed(
-							failedTargetResult(
-								target.targetId,
-								target.targetLanguage,
-								error.message,
-							),
-						),
-					GoogleResponseError: (error) =>
-						Effect.succeed(
-							failedTargetResult(
-								target.targetId,
-								target.targetLanguage,
-								error.message,
-							),
-						),
-					MappingIntegrityError: (error) =>
-						Effect.succeed(
-							failedTargetResult(
-								target.targetId,
-								target.targetLanguage,
-								error.message,
-							),
-						),
-					GoogleTransientError: (error) =>
-						Random.next.pipe(
-							Effect.map((jitter) =>
-								deferredTargetResult(
-									target.targetId,
-									target.targetLanguage,
-									captionTargetRetryDelay({
-										retryAfterMillis: error.retryAfterMillis,
-										previousAttempts: target.providerAttemptCount,
-										jitter,
-									}),
-								),
-							),
-						),
 				}),
-			);
-		});
+			),
+			Effect.catch((error) => Effect.succeed(fail(error.message))),
+		);
 
-		// Workpool owns durable retries for unexpected provider defects.
 		return runtime.runPromise(program);
 	},
 });
 
-async function resumeDeferredRetry(ctx: MutationCtx): Promise<void> {
-	if (await hasPendingLiveCaptionTargets(ctx)) {
-		await scheduleRetryDispatch(ctx);
-
-		return;
-	}
-
-	const candidates = await ctx.db
-		.query("acceptedCommitTargets")
-		.withIndex("by_priority_and_status", (q) =>
-			q.eq("priority", "retry").eq("status", "pending"),
-		)
-		.take(RETRY_DISPATCH_BATCH_SIZE + 1);
-
-	const candidate = candidates.find((target) => target.workId === undefined);
-
-	if (!candidate) return;
-
-	const commit = await getAcceptedCommitById(ctx, candidate.acceptedCommitId);
-
-	if (commit?.status !== "pending") return;
-
-	const targetIds = candidates
-		.filter(
-			(target) =>
-				target.acceptedCommitId === commit._id &&
-				target.status === "pending" &&
-				target.workId === undefined,
-		)
-		.map((target) => target._id);
-
-	if (targetIds.length === 0) return;
-
-	await Promise.all(
-		targetIds.map((targetId) =>
-			ctx.db.patch(targetId, { workId: RETRY_DISPATCHING_WORK_ID }),
-		),
-	);
-	await enqueueCaptionTargets(
-		ctx,
-		commit._id,
-		targetIds,
-		MAX_EXPLICIT_RETRY_DELAY_MS,
-	);
-
-	if (candidates.length > targetIds.length) {
-		await scheduleRetryDispatch(ctx, 0);
-	}
-}
-
-export const resumeDeferredRetries = internalMutation({
-	args: {},
-	returns: v.null(),
-	handler: async (ctx) => {
-		await resumeDeferredRetry(ctx);
-
-		return null;
-	},
-});
-
-type TargetCompletionArgs = {
-	workId: string;
-	context: { acceptedCommitId: Id<"acceptedCommits"> };
-	result: RunResult<TargetCompletion>;
-};
-
 async function mapTargetCompletion(
 	ctx: MutationCtx,
-	args: TargetCompletionArgs,
+	args: {
+		workId: string;
+		context: { acceptedCommitId: Id<"acceptedCommits"> };
+		result: RunResult<TargetCompletion>;
+	},
 ): Promise<TargetCompletion | null> {
 	if (args.result.kind === "success") return args.result.returnValue;
 
@@ -858,7 +607,7 @@ async function mapTargetCompletion(
 		targetLanguage: target.targetLanguage,
 		error:
 			args.result.kind === "failed"
-				? "Translation retries exhausted"
+				? "Translation failed unexpectedly"
 				: "Translation canceled",
 	};
 }

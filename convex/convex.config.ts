@@ -13,4 +13,6 @@ const app = defineApp({
 
 app.use(workpool, { name: "captionWorkpool" });
 
+app.use(workpool, { name: "captionRetryWorkpool" });
+
 export default app;

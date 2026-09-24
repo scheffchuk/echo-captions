@@ -14,6 +14,7 @@ const modules = import.meta.glob("./**/*.ts");
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+	registerWorkpool(t, "captionRetryWorkpool");
 
 	return t;
 }

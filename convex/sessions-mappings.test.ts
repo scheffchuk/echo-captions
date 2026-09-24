@@ -4,7 +4,7 @@
 import { register as registerWorkpool } from "@convex-dev/workpool/test";
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -13,6 +13,7 @@ const modules = import.meta.glob("./**/*.ts");
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+	registerWorkpool(t, "captionRetryWorkpool");
 
 	return t;
 }
@@ -85,9 +86,8 @@ describe("versioned translation mappings", () => {
 			changed: false,
 		});
 
-		const revision = await operator.query(
-			internal.mappingRevisions.getForAction,
-			{ revisionId: firstRevisionId },
+		const revision = await t.run((ctx) =>
+			ctx.db.get("translationMappingRevisions", firstRevisionId),
 		);
 
 		expect(revision).toMatchObject({
