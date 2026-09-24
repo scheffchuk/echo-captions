@@ -70,12 +70,12 @@ Verification gate: example tables, Unicode and overlap properties, revision conf
 
 - Replace the direct browser-to-action path with idempotent `acceptCommit` mutation semantics.
 - Validate Commit ID reuse, Broadcast identity, Commit ordinal, immutable transcript snapshot, source language, required targets, and Mapping revision atomically.
-- Enqueue one Workpool job per target with global parallelism four and lower priority for explicit retries than new live-caption work.
-- Give Google targets a 20-second timeout and at most three transient attempts with exponential backoff, jitter, and `Retry-After`; give Scribe token acquisition at most two short transient retries within ten seconds.
+- Enqueue one Workpool job per target: live-caption work in a Workpool with parallelism ten, explicit retries of failed targets in a separate Workpool with parallelism two.
+- Give Google targets a 20-second timeout and at most three in-action transient attempts with exponential backoff, jitter, and `Retry-After`; give Scribe token acquisition at most two short transient retries within ten seconds.
 - Record target completion idempotently. Publish one translated Segment only after every target succeeds, or one failed atomic Segment after permanent or exhausted failure.
 - Project pending Accepted commits and finished Segments under the same Commit ID for the Operator; expose only finished Segments publicly.
 
-Verification gate: duplicate acceptance, conflicting snapshots, out-of-order completion, repeated source text, partial target completion, Workpool retry classification, callback replay, explicit retry priority, and atomic Segment publication.
+Verification gate: duplicate acceptance, conflicting snapshots, out-of-order completion, repeated source text, partial target completion, transient retry within the action, callback replay, failed-target-only explicit retry, and atomic Segment publication.
 
 ### 7. Rebuild the browser Broadcast workflow around scoped Effect resources
 

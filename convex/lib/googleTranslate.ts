@@ -664,7 +664,7 @@ export class GoogleTranslate extends Context.Service<
 						accessToken,
 						document,
 						sourceLanguage?.trim() || undefined,
-					);
+					).pipe(Effect.retry(retrySchedule));
 				},
 				Effect.timeout("20 seconds"),
 				Effect.catchTag(

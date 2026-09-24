@@ -19,11 +19,6 @@ export const acceptedCommitTargetStatusValidator = v.union(
 	v.literal("failed"),
 );
 
-export const acceptedCommitTargetPriorityValidator = v.union(
-	v.literal("live"),
-	v.literal("retry"),
-);
-
 export const broadcastStatusValidator = v.union(
 	v.literal("active"),
 	v.literal("lost"),
@@ -97,11 +92,12 @@ export const acceptedCommitTargetTableValidator = v.object({
 	acceptedCommitId: v.id("acceptedCommits"),
 	sessionId: v.id("sessions"),
 	targetLanguage: v.string(),
-	priority: acceptedCommitTargetPriorityValidator,
 	status: acceptedCommitTargetStatusValidator,
 	translation: v.optional(v.string()),
 	error: v.optional(v.string()),
 	workId: v.optional(v.string()),
+	// Unwritten; kept so rows created before retry pools still validate.
+	priority: v.optional(v.union(v.literal("live"), v.literal("retry"))),
 	providerAttemptCount: v.optional(v.number()),
 });
 
@@ -139,7 +135,6 @@ export default defineSchema({
 			"targetLanguage",
 		])
 		.index("by_accepted_commit_id_and_status", ["acceptedCommitId", "status"])
-		.index("by_priority_and_status", ["priority", "status"])
 		.index("by_work_id", ["workId"]),
 	broadcasts: defineTable({
 		sessionId: v.id("sessions"),

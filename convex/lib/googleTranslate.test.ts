@@ -283,6 +283,44 @@ describe("GoogleTranslate", () => {
 		expect(error).toBeInstanceOf(GoogleAuthenticationError);
 	});
 
+	it("retries transient translation failures within the same call", async () => {
+		let translationRequests = 0;
+
+		const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+			const url = String(input);
+
+			if (url === "https://oauth2.googleapis.com/token") {
+				return Response.json({ access_token: "token", expires_in: 3600 });
+			}
+
+			translationRequests += 1;
+
+			if (translationRequests < 3) return new Response(null, { status: 503 });
+
+			return Response.json({
+				translations: [{ translatedText: "こんにちは" }],
+			});
+		});
+
+		const program = Effect.gen(function* () {
+			const google = yield* GoogleTranslate;
+
+			return yield* translateToLanguages(
+				google,
+				plainDocuments("Hello", ["ja"]),
+				"en",
+			);
+		}).pipe(
+			Effect.provide(GoogleTranslate.layer),
+			Effect.provide(configLayer()),
+			Effect.provideService(FetchHttpClient.Fetch, fetch),
+		);
+
+		const result = await Effect.runPromise(program);
+		expect(result.translations).toEqual({ ja: "こんにちは" });
+		expect(translationRequests).toBe(3);
+	});
+
 	it("reports malformed successful responses without retrying", async () => {
 		let translationRequests = 0;
 

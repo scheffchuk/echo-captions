@@ -16,7 +16,6 @@ import type * as http from "../http.js";
 import type * as lib_acceptedCommitTerminalization from "../lib/acceptedCommitTerminalization.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_broadcasts from "../lib/broadcasts.js";
-import type * as lib_captionRetry from "../lib/captionRetry.js";
 import type * as lib_captionWorkpool from "../lib/captionWorkpool.js";
 import type * as lib_googleTranslate from "../lib/googleTranslate.js";
 import type * as lib_languages from "../lib/languages.js";
@@ -25,7 +24,6 @@ import type * as lib_scribeClient from "../lib/scribeClient.js";
 import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_signupPolicy from "../lib/signupPolicy.js";
 import type * as lib_translationMappings from "../lib/translationMappings.js";
-import type * as mappingRevisions from "../mappingRevisions.js";
 import type * as scribe from "../scribe.js";
 import type * as segments from "../segments.js";
 import type * as sessions from "../sessions.js";
@@ -46,7 +44,6 @@ declare const fullApi: ApiFromModules<{
   "lib/acceptedCommitTerminalization": typeof lib_acceptedCommitTerminalization;
   "lib/auth": typeof lib_auth;
   "lib/broadcasts": typeof lib_broadcasts;
-  "lib/captionRetry": typeof lib_captionRetry;
   "lib/captionWorkpool": typeof lib_captionWorkpool;
   "lib/googleTranslate": typeof lib_googleTranslate;
   "lib/languages": typeof lib_languages;
@@ -55,7 +52,6 @@ declare const fullApi: ApiFromModules<{
   "lib/sessions": typeof lib_sessions;
   "lib/signupPolicy": typeof lib_signupPolicy;
   "lib/translationMappings": typeof lib_translationMappings;
-  mappingRevisions: typeof mappingRevisions;
   scribe: typeof scribe;
   segments: typeof segments;
   sessions: typeof sessions;
@@ -90,4 +86,5 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   captionWorkpool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"captionWorkpool">;
+  captionRetryWorkpool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"captionRetryWorkpool">;
 };

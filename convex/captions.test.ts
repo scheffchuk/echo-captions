@@ -22,6 +22,7 @@ function identityFor(userId: Id<"users">) {
 function makeTest() {
 	const t = convexTest(schema, modules);
 	registerWorkpool(t, "captionWorkpool");
+	registerWorkpool(t, "captionRetryWorkpool");
 
 	return t;
 }
@@ -168,62 +169,97 @@ describe("Convex-owned caption acceptance", () => {
 		expect(second.sequence).toBe(first.sequence + 1);
 	});
 
-	it("defers explicit retries while live targets are pending", async () => {
+	it("retries only failed targets and keeps finished translations", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);
 
-		const original = await operator.mutation(api.captions.acceptCommit, {
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
 			sessionId,
 			broadcastId,
 			commitOrdinal: 1,
-			commitId: "retry-priority",
-			sourceText: "Retry later",
+			commitId: "partial-retry",
+			sourceText: "Retry one language",
 			sourceLanguage: "en",
 		});
 
-		const originalTargets = await acceptedTargets(t, original.acceptedCommitId);
-		await t.run(async (ctx) => {
-			for (const target of originalTargets) {
-				await ctx.db.patch(target._id, {
-					priority: "retry",
-					status: "failed",
-					error: "Provider failure",
-				});
-			}
+		const [german, japanese] = await acceptedTargets(
+			t,
+			accepted.acceptedCommitId,
+		);
 
-			await ctx.db.patch(original.acceptedCommitId, {
-				status: "failed",
-				failedTargetCount: originalTargets.length,
+		if (!german?.workId || !japanese?.workId) {
+			throw new Error("Expected two scheduled targets");
+		}
+
+		for (const [target, returnValue] of [
+			[
+				japanese,
+				{
+					kind: "translated" as const,
+					targetId: japanese._id,
+					targetLanguage: japanese.targetLanguage,
+					translation: "言語",
+				},
+			],
+			[
+				german,
+				{
+					kind: "failed" as const,
+					targetId: german._id,
+					targetLanguage: german.targetLanguage,
+					error: "Provider rejected the request",
+				},
+			],
+		] as const) {
+			await operator.mutation(internal.captions.targetCompleted, {
+				workId: workId(target.workId ?? ""),
+				context: { acceptedCommitId: accepted.acceptedCommitId },
+				result: { kind: "success", returnValue },
 			});
-		});
-		await operator.mutation(api.captions.acceptCommit, {
-			sessionId,
-			broadcastId,
-			commitOrdinal: 2,
-			commitId: "live-priority",
-			sourceText: "Live first",
-			sourceLanguage: "en",
+		}
+
+		const retried = await operator.mutation(api.captions.retryCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
 		});
 
-		await operator.mutation(api.captions.retryCommit, {
-			acceptedCommitId: original.acceptedCommitId,
+		expect(retried).toMatchObject({
+			status: "pending",
+			completedTargetCount: 1,
+			failedTargetCount: 0,
 		});
 
-		const retryTarget = (
-			await acceptedTargets(t, original.acceptedCommitId)
-		)[0];
+		const [retriedGerman, keptJapanese] = await acceptedTargets(
+			t,
+			accepted.acceptedCommitId,
+		);
 
-		if (!retryTarget) throw new Error("Expected a retry target");
-		expect(retryTarget.priority).toBe("retry");
-		expect(retryTarget.workId).toBeUndefined();
+		expect(keptJapanese).toMatchObject({
+			status: "translated",
+			translation: "言語",
+		});
+		expect(keptJapanese?.workId).toBeUndefined();
+		expect(retriedGerman).toMatchObject({ status: "pending" });
 
-		await expect(
-			t.action(internal.captions.translateTarget, {
-				targetId: retryTarget._id,
-			}),
-		).resolves.toMatchObject({
-			kind: "deferred",
-			targetId: retryTarget._id,
+		if (!retriedGerman?.workId) throw new Error("Expected a retry job");
+		await operator.mutation(internal.captions.targetCompleted, {
+			workId: workId(retriedGerman.workId),
+			context: { acceptedCommitId: accepted.acceptedCommitId },
+			result: {
+				kind: "success",
+				returnValue: {
+					kind: "translated",
+					targetId: retriedGerman._id,
+					targetLanguage: retriedGerman.targetLanguage,
+					translation: "Sprache",
+				},
+			},
+		});
+
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "translated",
+			translations: { de: "Sprache", ja: "言語" },
 		});
 	});
 
@@ -260,76 +296,6 @@ describe("Convex-owned caption acceptance", () => {
 		} finally {
 			vi.useRealTimers();
 		}
-	});
-
-	it("reschedules provider backoff durably outside the running action", async () => {
-		const t = makeTest();
-
-		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
-			"en",
-			"ja",
-		]);
-
-		const accepted = await operator.mutation(api.captions.acceptCommit, {
-			sessionId,
-			broadcastId,
-			commitOrdinal: 1,
-			commitId: "provider-backoff",
-			sourceText: "Please retry later",
-			sourceLanguage: "en",
-		});
-
-		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
-
-		if (!target?.workId) throw new Error("Expected a scheduled target");
-		const previousWorkId = target.workId;
-
-		await operator.mutation(internal.captions.targetCompleted, {
-			workId: workId(previousWorkId),
-			context: { acceptedCommitId: accepted.acceptedCommitId },
-			result: {
-				kind: "success",
-				returnValue: {
-					kind: "deferred",
-					targetId: target._id,
-					targetLanguage: target.targetLanguage,
-					retryAfterMillis: 60_000,
-				},
-			},
-		});
-
-		const [rescheduled] = await acceptedTargets(t, accepted.acceptedCommitId);
-		expect(rescheduled).toMatchObject({
-			status: "pending",
-			providerAttemptCount: 1,
-		});
-		expect(rescheduled?.workId).toBeDefined();
-		expect(rescheduled?.workId).not.toBe(previousWorkId);
-
-		if (!rescheduled?.workId) throw new Error("Expected a rescheduled target");
-		await t.run(async (ctx) => {
-			await ctx.db.patch(rescheduled._id, { providerAttemptCount: 2 });
-		});
-
-		await operator.mutation(internal.captions.targetCompleted, {
-			workId: workId(rescheduled.workId),
-			context: { acceptedCommitId: accepted.acceptedCommitId },
-			result: {
-				kind: "success",
-				returnValue: {
-					kind: "deferred",
-					targetId: rescheduled._id,
-					targetLanguage: rescheduled.targetLanguage,
-					retryAfterMillis: 60_000,
-				},
-			},
-		});
-
-		const [exhausted] = await acceptedTargets(t, accepted.acceptedCommitId);
-		expect(exhausted).toMatchObject({
-			status: "failed",
-			error: "Translation retries exhausted",
-		});
 	});
 
 	it("keeps partial target progress private until one atomic publication", async () => {
