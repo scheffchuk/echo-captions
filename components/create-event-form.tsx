@@ -1,5 +1,4 @@
 import { useForm } from "@tanstack/react-form";
-import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { Match, Schema } from "effect";
@@ -13,7 +12,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { LabelWithHint } from "@/components/label-with-hint";
-import { ShareAudienceDialog } from "@/components/share-audience-dialog";
 import { TranslationMappingsField } from "@/components/translation-mappings-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -283,19 +281,18 @@ function StepPanel({
 
 export function CreateEventForm({
 	triggerVariant = "primary",
+	onCreated,
 }: {
 	triggerVariant?: "primary" | "outline";
+	onCreated: (slug: string) => void;
 }) {
-	const navigate = useNavigate();
 	const createSession = useMutation(api.sessions.create);
 
 	return (
 		<CreateEventFormView
 			triggerVariant={triggerVariant}
 			createSession={createSession}
-			onContinue={(options) => {
-				void navigate(options);
-			}}
+			onCreated={onCreated}
 		/>
 	);
 }
@@ -303,26 +300,20 @@ export function CreateEventForm({
 export function CreateEventFormView({
 	triggerVariant = "primary",
 	createSession,
-	onContinue,
+	onCreated,
 }: {
 	triggerVariant?: "primary" | "outline";
 	createSession: CreateSession;
-	onContinue: (options: {
-		to: "/broadcast/$slug";
-		params: { slug: string };
-	}) => void;
+	onCreated: (slug: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const [currentStep, setCurrentStep] = useState(0);
 	const [direction, setDirection] = useState(1);
-	const [createdSlug, setCreatedSlug] = useState<string | null>(null);
-	const [shareOpen, setShareOpen] = useState(false);
 
 	const form = useCreateEventForm(createSession, (slug) => {
 		setOpen(false);
 		reset();
-		setCreatedSlug(slug);
-		setShareOpen(true);
+		onCreated(slug);
 	});
 
 	const reset = () => {
@@ -362,167 +353,150 @@ export function CreateEventFormView({
 	const isLastStep = currentStep === STEPS.length - 1;
 
 	return (
-		<>
-			<Dialog
-				open={open}
-				onOpenChange={(next) => {
-					setOpen(next);
+		<Dialog
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
 
-					if (!next) reset();
-				}}
-			>
-				<DialogTrigger asChild>
-					<Button
-						variant={triggerVariant === "outline" ? "outline" : undefined}
-						className={
-							triggerVariant === "primary"
-								? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
-								: undefined
-						}
-					>
-						<Plus className="size-4" />
-						New event
-					</Button>
-				</DialogTrigger>
-				<DialogContent
-					className="gap-0 overflow-hidden p-0 sm:max-w-xl"
-					showCloseButton={false}
+				if (!next) reset();
+			}}
+		>
+			<DialogTrigger asChild>
+				<Button
+					variant={triggerVariant === "outline" ? "outline" : undefined}
+					className={
+						triggerVariant === "primary"
+							? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
+							: undefined
+					}
 				>
-					<div>
-						<div className="relative px-8 py-4">
+					<Plus className="size-4" />
+					New event
+				</Button>
+			</DialogTrigger>
+			<DialogContent
+				className="gap-0 overflow-hidden p-0 sm:max-w-xl"
+				showCloseButton={false}
+			>
+				<div>
+					<div className="relative px-8 py-4">
+						<div
+							key={currentStep}
+							aria-live="polite"
+							aria-atomic="true"
+							className={cn(
+								"flex max-w-[calc(100%-6.5rem)] flex-col gap-2",
+								stepEnterClass(),
+							)}
+							style={{ animationTimingFunction: STEP_EASE }}
+						>
+							<DialogTitle className="text-title">
+								{STEPS[currentStep].title}
+							</DialogTitle>
+							<DialogDescription>
+								{STEPS[currentStep].description}
+							</DialogDescription>
+						</div>
+						<div className="absolute top-4 right-4 flex items-center gap-2">
 							<div
-								key={currentStep}
-								aria-live="polite"
-								aria-atomic="true"
-								className={cn(
-									"flex max-w-[calc(100%-6.5rem)] flex-col gap-2",
-									stepEnterClass(),
-								)}
-								style={{ animationTimingFunction: STEP_EASE }}
+								role="progressbar"
+								aria-valuenow={currentStep + 1}
+								aria-valuemin={1}
+								aria-valuemax={STEPS.length}
+								aria-label={`Step ${currentStep + 1} of ${STEPS.length}`}
+								className="flex items-center gap-2"
 							>
-								<DialogTitle className="text-title">
-									{STEPS[currentStep].title}
-								</DialogTitle>
-								<DialogDescription>
-									{STEPS[currentStep].description}
-								</DialogDescription>
+								{STEPS.map((step, index) => (
+									<div
+										key={step.title}
+										aria-hidden
+										className={cn(
+											"h-2 rounded-full transition-[width,background-color] duration-200 ease-out",
+											currentStep === index
+												? "w-8 bg-echo-live"
+												: "w-2 bg-muted",
+										)}
+									/>
+								))}
 							</div>
-							<div className="absolute top-4 right-4 flex items-center gap-2">
-								<div
-									role="progressbar"
-									aria-valuenow={currentStep + 1}
-									aria-valuemin={1}
-									aria-valuemax={STEPS.length}
-									aria-label={`Step ${currentStep + 1} of ${STEPS.length}`}
-									className="flex items-center gap-2"
-								>
-									{STEPS.map((step, index) => (
-										<div
-											key={step.title}
-											aria-hidden
-											className={cn(
-												"h-2 rounded-full transition-[width,background-color] duration-200 ease-out",
-												currentStep === index
-													? "w-8 bg-echo-live"
-													: "w-2 bg-muted",
-											)}
-										/>
-									))}
-								</div>
-								<DialogClose className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
-									<X />
-									<span className="sr-only">Close</span>
-								</DialogClose>
-							</div>
-						</div>
-
-						<div className="relative overflow-hidden border-y">
-							<form.Subscribe selector={(state) => state.isSubmitting}>
-								{(isSubmitting) => (
-									<fieldset
-										disabled={isSubmitting}
-										className="m-0 min-w-0 border-0"
-									>
-										<div className="px-8 py-4">
-											<StepPanel step={currentStep} direction={direction}>
-												{currentStep === 0 && <StepEventDetails form={form} />}
-												{currentStep === 1 && <StepLanguages form={form} />}
-											</StepPanel>
-										</div>
-									</fieldset>
-								)}
-							</form.Subscribe>
-						</div>
-
-						<div className="flex flex-col gap-4 px-8 py-4">
-							<form.Subscribe selector={(state) => state.errorMap.onSubmit}>
-								{(submitError) => {
-									const message = getFormErrorMessage(submitError);
-
-									return message ? (
-										<p role="alert" className="text-sm text-destructive">
-											{message}
-										</p>
-									) : null;
-								}}
-							</form.Subscribe>
-							<form.Subscribe selector={(state) => state.isSubmitting}>
-								{(isSubmitting) => (
-									<div className="flex items-center justify-between">
-										<Button
-											variant="secondary"
-											type="button"
-											onClick={prevStep}
-											disabled={currentStep === 0 || isSubmitting}
-										>
-											<ChevronLeft className="size-4" />
-											Back
-										</Button>
-										<Button
-											type="button"
-											onClick={() => void nextStep()}
-											disabled={isSubmitting}
-											className={
-												isLastStep
-													? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
-													: undefined
-											}
-										>
-											{isLastStep ? (
-												<>
-													{isSubmitting ? "Creating…" : "Create event"}
-													<Check className="size-4" />
-												</>
-											) : (
-												<>
-													Next
-													<ChevronRight className="size-4" />
-												</>
-											)}
-										</Button>
-									</div>
-								)}
-							</form.Subscribe>
+							<DialogClose className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
+								<X />
+								<span className="sr-only">Close</span>
+							</DialogClose>
 						</div>
 					</div>
-				</DialogContent>
-			</Dialog>
-			{createdSlug ? (
-				<ShareAudienceDialog
-					slug={createdSlug}
-					open={shareOpen}
-					onOpenChange={setShareOpen}
-					onContinue={() => {
-						setShareOpen(false);
-						onContinue({
-							to: "/broadcast/$slug",
-							params: { slug: createdSlug },
-						});
-						setCreatedSlug(null);
-					}}
-				/>
-			) : null}
-		</>
+
+					<div className="relative overflow-hidden border-y">
+						<form.Subscribe selector={(state) => state.isSubmitting}>
+							{(isSubmitting) => (
+								<fieldset
+									disabled={isSubmitting}
+									className="m-0 min-w-0 border-0"
+								>
+									<div className="px-8 py-4">
+										<StepPanel step={currentStep} direction={direction}>
+											{currentStep === 0 && <StepEventDetails form={form} />}
+											{currentStep === 1 && <StepLanguages form={form} />}
+										</StepPanel>
+									</div>
+								</fieldset>
+							)}
+						</form.Subscribe>
+					</div>
+
+					<div className="flex flex-col gap-4 px-8 py-4">
+						<form.Subscribe selector={(state) => state.errorMap.onSubmit}>
+							{(submitError) => {
+								const message = getFormErrorMessage(submitError);
+
+								return message ? (
+									<p role="alert" className="text-sm text-destructive">
+										{message}
+									</p>
+								) : null;
+							}}
+						</form.Subscribe>
+						<form.Subscribe selector={(state) => state.isSubmitting}>
+							{(isSubmitting) => (
+								<div className="flex items-center justify-between">
+									<Button
+										variant="secondary"
+										type="button"
+										onClick={prevStep}
+										disabled={currentStep === 0 || isSubmitting}
+									>
+										<ChevronLeft className="size-4" />
+										Back
+									</Button>
+									<Button
+										type="button"
+										onClick={() => void nextStep()}
+										disabled={isSubmitting}
+										className={
+											isLastStep
+												? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
+												: undefined
+										}
+									>
+										{isLastStep ? (
+											<>
+												{isSubmitting ? "Creating…" : "Create event"}
+												<Check className="size-4" />
+											</>
+										) : (
+											<>
+												Next
+												<ChevronRight className="size-4" />
+											</>
+										)}
+									</Button>
+								</div>
+							)}
+						</form.Subscribe>
+					</div>
+				</div>
+			</DialogContent>
+		</Dialog>
 	);
 }
 

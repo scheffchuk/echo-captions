@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import {
 	Check,
@@ -20,6 +20,7 @@ import {
 	SessionGridSkeleton,
 } from "@/components/loading-states";
 import { OperatorChrome } from "@/components/operator-chrome";
+import { ShareAudienceDialog } from "@/components/share-audience-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
 	AlertDialog,
@@ -274,6 +275,16 @@ export function Dashboard() {
 
 	const [searchQuery, setSearchQuery] = useState("");
 
+	const navigate = useNavigate();
+	// Kept separate from shareOpen so the dialog content survives its close animation.
+	const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+	const [shareOpen, setShareOpen] = useState(false);
+
+	const showShare = (slug: string) => {
+		setCreatedSlug(slug);
+		setShareOpen(true);
+	};
+
 	const sortedSessions = sessions ? sortSessions(sessions) : undefined;
 
 	const filteredSessions = sortedSessions?.filter((s) =>
@@ -362,14 +373,17 @@ export function Dashboard() {
 							<SessionGridSkeleton />
 						) : sessions === null ? null : sessions.length === 0 ? (
 							<DashboardEmptyState>
-								<CreateEventForm />
+								<CreateEventForm onCreated={showShare} />
 							</DashboardEmptyState>
 						) : (
 							<>
 								{isLaunchpad && primaryLive ? (
 									<div className="space-y-4">
 										<div className="flex items-center justify-end">
-											<CreateEventForm triggerVariant="outline" />
+											<CreateEventForm
+												triggerVariant="outline"
+												onCreated={showShare}
+											/>
 										</div>
 										<LiveLaunchpad
 											session={primaryLive}
@@ -386,7 +400,7 @@ export function Dashboard() {
 								) : (
 									<div className="flex items-center justify-between gap-4">
 										<h2 className="text-title">Events</h2>
-										<CreateEventForm />
+										<CreateEventForm onCreated={showShare} />
 									</div>
 								)}
 
@@ -441,6 +455,21 @@ export function Dashboard() {
 						)}
 					</section>
 				</div>
+
+				{createdSlug ? (
+					<ShareAudienceDialog
+						slug={createdSlug}
+						open={shareOpen}
+						onOpenChange={setShareOpen}
+						onContinue={() => {
+							setShareOpen(false);
+							void navigate({
+								to: "/broadcast/$slug",
+								params: { slug: createdSlug },
+							});
+						}}
+					/>
+				) : null}
 
 				<AlertDialog
 					open={sessionToDelete !== null}
