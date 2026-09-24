@@ -1,6 +1,7 @@
-import { CircleHelp, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
+import { LabelWithHint } from "@/components/label-with-hint";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -9,11 +10,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { getCommonLanguageName } from "@/lib/languages";
 import {
 	addTranslationMappingDraftRow,
@@ -37,43 +33,6 @@ const issueMessages: Record<TranslationMappingDraftIssue["code"], string> = {
 	duplicate_mapping: "This term already has a mapping for this language.",
 	conflict: "Reload the glossary before saving.",
 };
-
-function FieldHint({ content }: { content: string }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<button
-					type="button"
-					tabIndex={-1}
-					className="inline-flex shrink-0 text-muted-foreground hover:text-foreground"
-					aria-label={content}
-				>
-					<CircleHelp className="size-4" />
-				</button>
-			</TooltipTrigger>
-			<TooltipContent side="right" className="max-w-56">
-				{content}
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-function LabelWithHint({
-	htmlFor,
-	label,
-	hint,
-}: {
-	htmlFor?: string;
-	label: string;
-	hint: string;
-}) {
-	return (
-		<FieldLabel htmlFor={htmlFor} className="inline-flex items-center gap-2">
-			{label}
-			<FieldHint content={hint} />
-		</FieldLabel>
-	);
-}
 
 export function TranslationMappingsField({
 	mappings,

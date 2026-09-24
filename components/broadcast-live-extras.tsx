@@ -1,7 +1,6 @@
 import { BookText, Check, Copy, MoreHorizontal, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { BroadcastGlossaryPanel } from "@/components/broadcast-glossary-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +17,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Id } from "@/convex/_generated/dataModel";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getViewerUrl } from "@/lib/viewer-url";
 import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
@@ -36,15 +36,16 @@ export function BroadcastLiveExtras({
 }) {
 	const [qrOpen, setQrOpen] = useState(false);
 	const [glossaryOpen, setGlossaryOpen] = useState(false);
-	const [copied, setCopied] = useState(false);
 	const viewerUrl = getViewerUrl(slug);
+	const { state: copyState, copy } = useCopyToClipboard();
+	const copied = copyState === "copied";
 
-	const copyLink = async () => {
-		await navigator.clipboard.writeText(viewerUrl);
-		setCopied(true);
-		toast.success("Viewer link copied");
-		setTimeout(() => setCopied(false), 2000);
-	};
+	const copyLink = () =>
+		copy(
+			() => viewerUrl,
+			"Viewer link copied",
+			"Couldn't copy link. Try again.",
+		);
 
 	return (
 		<>

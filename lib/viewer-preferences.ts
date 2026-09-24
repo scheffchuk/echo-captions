@@ -53,22 +53,16 @@ export function setStoredLanguagePair(slug: string, pair: LanguagePair) {
 	localStorage.setItem(`${LANGUAGE_PAIR_PREFIX}${slug}`, JSON.stringify(pair));
 }
 
-function pickStoredPair(
-	stored: LanguagePair,
+function storedPairForAudience(
+	slug: string,
 	audienceLanguages: string[],
 ): LanguagePair | null {
-	if (stored.length === 1 && audienceLanguages.includes(stored[0])) {
-		return stored;
-	}
+	const stored = getStoredLanguagePair(slug);
 
-	if (
-		stored.length === 2 &&
-		audienceLanguages.includes(stored[0]) &&
-		audienceLanguages.includes(stored[1]) &&
-		stored[0] !== stored[1]
-	) {
-		return stored;
-	}
+	if (!stored) return null;
+
+	if (stored.every((code) => audienceLanguages.includes(code))) return stored;
+	removeStoredLanguagePair(slug);
 
 	return null;
 }
@@ -78,16 +72,10 @@ export function resolveViewerLanguagePair(
 	slug: string,
 	audienceLanguages: string[],
 ): LanguagePair {
-	const stored = getStoredLanguagePair(slug);
-
-	if (stored) {
-		const valid = pickStoredPair(stored, audienceLanguages);
-
-		if (valid) return valid;
-		removeStoredLanguagePair(slug);
-	}
-
-	return defaultAudienceLanguage(audienceLanguages);
+	return (
+		storedPairForAudience(slug, audienceLanguages) ??
+		defaultAudienceLanguage(audienceLanguages)
+	);
 }
 
 /** Broadcast / operator: stored preference, else primary + second language. */
@@ -95,16 +83,10 @@ export function resolveLanguagePair(
 	slug: string,
 	audienceLanguages: string[],
 ): LanguagePair {
-	const stored = getStoredLanguagePair(slug);
-
-	if (stored) {
-		const valid = pickStoredPair(stored, audienceLanguages);
-
-		if (valid) return valid;
-		removeStoredLanguagePair(slug);
-	}
-
-	return defaultLanguagePair(audienceLanguages);
+	return (
+		storedPairForAudience(slug, audienceLanguages) ??
+		defaultLanguagePair(audienceLanguages)
+	);
 }
 
 export function getStoredTextSize(): number {

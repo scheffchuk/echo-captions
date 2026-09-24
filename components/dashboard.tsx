@@ -9,7 +9,7 @@ import {
 	Search,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ChangePasswordForm } from "@/components/change-password-form";
 import { CreateEventForm } from "@/components/create-event-form";
@@ -42,14 +42,14 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import {
-	getClipboardErrorMessage,
-	getPublicConvexError,
-} from "@/lib/expected-errors";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { getPublicConvexError } from "@/lib/expected-errors";
 import { getCommonLanguageName } from "@/lib/languages";
 import { cn } from "@/lib/utils";
 import { getViewerUrl } from "@/lib/viewer-url";
 import { useOperatorAuth } from "../src/lib/auth/operator";
+
+type DashboardSession = Doc<"sessions"> & { isLive: boolean };
 
 function formatSessionDate(timestamp: number | undefined) {
 	if (!timestamp) return null;
@@ -84,7 +84,7 @@ function formatLanguages(codes: string[]) {
 }
 
 function formatSessionMeta(
-	session: Doc<"sessions"> & { isLive: boolean },
+	session: DashboardSession,
 	opts?: { live?: boolean },
 ) {
 	const parts = [
@@ -98,7 +98,7 @@ function formatSessionMeta(
 	return parts.join(" · ");
 }
 
-function sortSessions(sessions: Array<Doc<"sessions"> & { isLive: boolean }>) {
+function sortSessions(sessions: Array<DashboardSession>) {
 	return [...sessions].sort((a, b) => {
 		if (a.isLive !== b.isLive) {
 			return a.isLive ? -1 : 1;
@@ -111,10 +111,7 @@ function sortSessions(sessions: Array<Doc<"sessions"> & { isLive: boolean }>) {
 	});
 }
 
-function matchesQuery(
-	session: Doc<"sessions"> & { isLive: boolean },
-	query: string,
-) {
+function matchesQuery(session: DashboardSession, query: string) {
 	const q = query.trim().toLowerCase();
 
 	if (!q) return true;
@@ -122,29 +119,86 @@ function matchesQuery(
 	return session.title.toLowerCase().includes(q);
 }
 
-type SessionBusy = {
-	copyingSessionId: Id<"sessions"> | null;
-	copyingLinkSessionId: Id<"sessions"> | null;
-	copiedSessionId: Id<"sessions"> | null;
-	copiedLinkSessionId: Id<"sessions"> | null;
-	deletingSessionId: Id<"sessions"> | null;
-};
+function SessionActions({
+	session,
+	compact,
+	deleting,
+	onDelete,
+}: {
+	session: DashboardSession;
+	compact: boolean;
+	deleting: boolean;
+	onDelete: () => void;
+}) {
+	const convex = useConvex();
+	const link = useCopyToClipboard();
+	const transcript = useCopyToClipboard();
+	const labelClass = compact ? "sr-only sm:not-sr-only" : undefined;
+
+	return (
+		<>
+			<Button
+				size="sm"
+				variant={compact ? "ghost" : "outline"}
+				disabled={deleting || link.state === "copying"}
+				onClick={() =>
+					void link.copy(
+						() => getViewerUrl(session.slug),
+						"Link copied",
+						"Couldn't copy link. Try again.",
+					)
+				}
+			>
+				{link.state === "copied" ? (
+					<Check className="size-4" />
+				) : (
+					<Link2 className="size-4" />
+				)}
+				<span className={labelClass}>Share</span>
+			</Button>
+			<Button
+				size="sm"
+				variant="ghost"
+				disabled={deleting || transcript.state === "copying"}
+				onClick={() =>
+					void transcript.copy(
+						() =>
+							convex.query(api.segments.transcriptText, {
+								sessionId: session._id,
+							}),
+						"Copied",
+						"Couldn't copy transcript. Try again.",
+					)
+				}
+			>
+				{transcript.state === "copied" ? (
+					<Check className="size-4" />
+				) : (
+					<Copy className="size-4" />
+				)}
+				<span className={labelClass}>Transcript</span>
+			</Button>
+			<Button
+				size="sm"
+				variant="ghost"
+				className="text-muted-foreground hover:text-destructive"
+				disabled={deleting}
+				onClick={onDelete}
+			>
+				<Trash2 className="size-4" />
+				<span className={compact ? "sr-only" : undefined}>Delete</span>
+			</Button>
+		</>
+	);
+}
 
 function LiveLaunchpad({
 	session,
-	busy,
-	onShare,
-	onCopyTranscript,
-	onDelete,
+	actions,
 }: {
-	session: Doc<"sessions"> & { isLive: boolean };
-	busy: SessionBusy;
-	onShare: () => void;
-	onCopyTranscript: () => void;
-	onDelete: () => void;
+	session: DashboardSession;
+	actions: ReactNode;
 }) {
-	const actionsDisabled = busy.deletingSessionId === session._id;
-
 	return (
 		<article className="flex flex-col gap-6 rounded-2xl bg-echo-live/8 p-6 ring-2 ring-echo-live/40 dark:bg-echo-live/15">
 			<div className="space-y-2">
@@ -165,46 +219,7 @@ function LiveLaunchpad({
 						Continue
 					</Link>
 				</Button>
-				<div className="flex flex-wrap gap-2">
-					<Button
-						size="sm"
-						variant="outline"
-						disabled={
-							actionsDisabled || busy.copyingLinkSessionId === session._id
-						}
-						onClick={onShare}
-					>
-						{busy.copiedLinkSessionId === session._id ? (
-							<Check className="size-4" />
-						) : (
-							<Link2 className="size-4" />
-						)}
-						Share
-					</Button>
-					<Button
-						size="sm"
-						variant="ghost"
-						disabled={actionsDisabled || busy.copyingSessionId === session._id}
-						onClick={onCopyTranscript}
-					>
-						{busy.copiedSessionId === session._id ? (
-							<Check className="size-4" />
-						) : (
-							<Copy className="size-4" />
-						)}
-						Transcript
-					</Button>
-					<Button
-						size="sm"
-						variant="ghost"
-						className="text-muted-foreground hover:text-destructive"
-						disabled={actionsDisabled}
-						onClick={onDelete}
-					>
-						<Trash2 className="size-4" />
-						Delete
-					</Button>
-				</div>
+				<div className="flex flex-wrap gap-2">{actions}</div>
 			</div>
 		</article>
 	);
@@ -212,19 +227,11 @@ function LiveLaunchpad({
 
 function IdleSessionRow({
 	session,
-	busy,
-	onShare,
-	onCopyTranscript,
-	onDelete,
+	actions,
 }: {
-	session: Doc<"sessions"> & { isLive: boolean };
-	busy: SessionBusy;
-	onShare: () => void;
-	onCopyTranscript: () => void;
-	onDelete: () => void;
+	session: DashboardSession;
+	actions: ReactNode;
 }) {
-	const actionsDisabled = busy.deletingSessionId === session._id;
-
 	return (
 		<article className="flex flex-col gap-3 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/8 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
 			<div className="min-w-0 space-y-1">
@@ -245,51 +252,13 @@ function IdleSessionRow({
 						Open
 					</Link>
 				</Button>
-				<Button
-					size="sm"
-					variant="ghost"
-					disabled={
-						actionsDisabled || busy.copyingLinkSessionId === session._id
-					}
-					onClick={onShare}
-				>
-					{busy.copiedLinkSessionId === session._id ? (
-						<Check className="size-4" />
-					) : (
-						<Link2 className="size-4" />
-					)}
-					<span className="sr-only sm:not-sr-only">Share</span>
-				</Button>
-				<Button
-					size="sm"
-					variant="ghost"
-					disabled={actionsDisabled || busy.copyingSessionId === session._id}
-					onClick={onCopyTranscript}
-				>
-					{busy.copiedSessionId === session._id ? (
-						<Check className="size-4" />
-					) : (
-						<Copy className="size-4" />
-					)}
-					<span className="sr-only sm:not-sr-only">Transcript</span>
-				</Button>
-				<Button
-					size="sm"
-					variant="ghost"
-					className="text-muted-foreground hover:text-destructive"
-					disabled={actionsDisabled}
-					onClick={onDelete}
-				>
-					<Trash2 className="size-4" />
-					<span className="sr-only">Delete</span>
-				</Button>
+				{actions}
 			</div>
 		</article>
 	);
 }
 
 export function Dashboard() {
-	const convex = useConvex();
 	const { changePassword, signOut } = useOperatorAuth();
 	const [passwordOpen, setPasswordOpen] = useState(false);
 	const sessions = useQuery(api.sessions.listMine);
@@ -301,19 +270,6 @@ export function Dashboard() {
 	} | null>(null);
 
 	const [deletingSessionId, setDeletingSessionId] =
-		useState<Id<"sessions"> | null>(null);
-
-	const [copyingSessionId, setCopyingSessionId] =
-		useState<Id<"sessions"> | null>(null);
-
-	const [copyingLinkSessionId, setCopyingLinkSessionId] =
-		useState<Id<"sessions"> | null>(null);
-
-	const [copiedSessionId, setCopiedSessionId] = useState<Id<"sessions"> | null>(
-		null,
-	);
-
-	const [copiedLinkSessionId, setCopiedLinkSessionId] =
 		useState<Id<"sessions"> | null>(null);
 
 	const [searchQuery, setSearchQuery] = useState("");
@@ -329,59 +285,6 @@ export function Dashboard() {
 	const isLaunchpad = liveSessions.length > 0;
 	const primaryLive = liveSessions[0];
 	const otherLive = liveSessions.slice(1);
-
-	const busy: SessionBusy = {
-		copyingSessionId,
-		copyingLinkSessionId,
-		copiedSessionId,
-		copiedLinkSessionId,
-		deletingSessionId,
-	};
-
-	const copyTranscript = async (sessionId: Id<"sessions">) => {
-		setCopyingSessionId(sessionId);
-
-		try {
-			const text = await convex.query(api.segments.transcriptText, {
-				sessionId,
-			});
-
-			await navigator.clipboard.writeText(text);
-			setCopiedSessionId(sessionId);
-			toast.success("Copied");
-			setTimeout(() => setCopiedSessionId(null), 2000);
-		} catch (err) {
-			if (err instanceof DOMException) {
-				toast.error(
-					getClipboardErrorMessage(err, "Couldn't copy transcript. Try again."),
-				);
-			} else {
-				toast.error(
-					getPublicConvexError(err, "Couldn't copy transcript. Try again.")
-						.message,
-				);
-			}
-		} finally {
-			setCopyingSessionId(null);
-		}
-	};
-
-	const copyViewerLink = async (slug: string, sessionId: Id<"sessions">) => {
-		setCopyingLinkSessionId(sessionId);
-
-		try {
-			await navigator.clipboard.writeText(getViewerUrl(slug));
-			setCopiedLinkSessionId(sessionId);
-			toast.success("Link copied");
-			setTimeout(() => setCopiedLinkSessionId(null), 2000);
-		} catch (err) {
-			toast.error(
-				getClipboardErrorMessage(err, "Couldn't copy link. Try again."),
-			);
-		} finally {
-			setCopyingLinkSessionId(null);
-		}
-	};
 
 	const confirmDelete = async () => {
 		if (!sessionToDelete) return;
@@ -401,15 +304,16 @@ export function Dashboard() {
 		}
 	};
 
-	const sessionHandlers = (session: Doc<"sessions"> & { isLive: boolean }) => ({
-		onShare: () => void copyViewerLink(session.slug, session._id),
-		onCopyTranscript: () => void copyTranscript(session._id),
-		onDelete: () =>
-			setSessionToDelete({
-				id: session._id,
-				title: session.title,
-			}),
-	});
+	const sessionActions = (session: DashboardSession, compact: boolean) => (
+		<SessionActions
+			session={session}
+			compact={compact}
+			deleting={deletingSessionId === session._id}
+			onDelete={() =>
+				setSessionToDelete({ id: session._id, title: session.title })
+			}
+		/>
+	);
 
 	return (
 		<OperatorChrome>
@@ -469,15 +373,13 @@ export function Dashboard() {
 										</div>
 										<LiveLaunchpad
 											session={primaryLive}
-											busy={busy}
-											{...sessionHandlers(primaryLive)}
+											actions={sessionActions(primaryLive, false)}
 										/>
 										{otherLive.map((session) => (
 											<LiveLaunchpad
 												key={session._id}
 												session={session}
-												busy={busy}
-												{...sessionHandlers(session)}
+												actions={sessionActions(session, false)}
 											/>
 										))}
 									</div>
@@ -528,8 +430,7 @@ export function Dashboard() {
 													<IdleSessionRow
 														key={session._id}
 														session={session}
-														busy={busy}
-														{...sessionHandlers(session)}
+														actions={sessionActions(session, true)}
 													/>
 												))}
 											</div>

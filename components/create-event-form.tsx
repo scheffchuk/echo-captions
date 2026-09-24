@@ -8,11 +8,11 @@ import {
 	Check,
 	ChevronLeft,
 	ChevronRight,
-	CircleHelp,
 	Plus,
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import { LabelWithHint } from "@/components/label-with-hint";
 import { ShareAudienceDialog } from "@/components/share-audience-dialog";
 import { TranslationMappingsField } from "@/components/translation-mappings-field";
 import { Badge } from "@/components/ui/badge";
@@ -42,11 +42,6 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { api } from "@/convex/_generated/api";
 import { getPublicConvexError } from "@/lib/expected-errors";
 import { getCommonLanguageName } from "@/lib/languages";
@@ -255,43 +250,6 @@ const STEPS = [
 ];
 
 const QUICK_AUDIENCE_CODES = ["en", "zh", "ja", "ko", "es", "fr"] as const;
-
-function FieldHint({ content }: { content: string }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<button
-					type="button"
-					tabIndex={-1}
-					className="inline-flex shrink-0 text-muted-foreground hover:text-foreground"
-					aria-label={content}
-				>
-					<CircleHelp className="size-4" />
-				</button>
-			</TooltipTrigger>
-			<TooltipContent side="right" className="max-w-56">
-				{content}
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-function LabelWithHint({
-	htmlFor,
-	label,
-	hint,
-}: {
-	htmlFor?: string;
-	label: string;
-	hint: string;
-}) {
-	return (
-		<FieldLabel htmlFor={htmlFor} className="inline-flex items-center gap-2">
-			{label}
-			<FieldHint content={hint} />
-		</FieldLabel>
-	);
-}
 
 const STEP_EASE = "cubic-bezier(0.23, 1, 0.32, 1)";
 
