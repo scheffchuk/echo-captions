@@ -2,21 +2,8 @@ import { Schema } from "effect";
 import { normalizeLanguageCode } from "../../shared/languages";
 import {
 	canonicalizeTranslationMappings as canonicalizeMappingPolicy,
-	canonicalTranslationMappingsEqual,
-	filterMappingsForAudience,
-	MAX_MAPPING_VALUE_CHARS,
-	MAX_TRANSLATION_MAPPINGS,
-	type StoredTranslationMapping,
-} from "../../src/lib/translationMappings";
-
-export type TranslationMapping = StoredTranslationMapping;
-
-export {
-	canonicalTranslationMappingsEqual,
-	filterMappingsForAudience,
-	MAX_MAPPING_VALUE_CHARS,
-	MAX_TRANSLATION_MAPPINGS,
-};
+	type TranslationMapping,
+} from "../../shared/translationMappings";
 
 export class MappingValidationError extends Schema.TaggedError<MappingValidationError>()(
 	"MappingValidationError",

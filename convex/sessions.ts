@@ -3,6 +3,11 @@ import {
 	isTaggedPublicError,
 	publicErrorCode,
 } from "../shared/tagged-public-error";
+import {
+	canonicalTranslationMappingsEqual,
+	filterMappingsForAudience,
+	type TranslationMapping,
+} from "../shared/translationMappings";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -39,11 +44,8 @@ import {
 } from "./lib/sessions";
 import {
 	canonicalizeTranslationMappings,
-	canonicalTranslationMappingsEqual,
-	filterMappingsForAudience,
 	MappingRevisionConflict,
 	MappingValidationError,
-	type TranslationMapping,
 } from "./lib/translationMappings";
 
 import {

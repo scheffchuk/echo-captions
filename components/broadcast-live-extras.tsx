@@ -19,7 +19,7 @@ import {
 import type { Id } from "@/convex/_generated/dataModel";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getViewerUrl } from "@/lib/viewer-url";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
+import type { TranslationMapping } from "@/shared/translationMappings";
 
 export function BroadcastLiveExtras({
 	slug,
@@ -30,7 +30,7 @@ export function BroadcastLiveExtras({
 }: {
 	slug: string;
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
 }) {

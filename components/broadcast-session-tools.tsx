@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
+import type { TranslationMapping } from "@/shared/translationMappings";
 
 export function BroadcastSessionTools({
 	slug,
@@ -27,7 +27,7 @@ export function BroadcastSessionTools({
 }: {
 	slug: string;
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
 	collapsed: boolean;

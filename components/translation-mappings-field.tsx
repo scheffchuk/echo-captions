@@ -11,6 +11,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { getCommonLanguageName } from "@/lib/languages";
+import type { TranslationMapping } from "@/shared/translationMappings";
 import {
 	addTranslationMappingDraftRow,
 	createTranslationMappingDraft,
@@ -20,7 +21,6 @@ import {
 	type TranslationMappingIdFactory,
 	updateTranslationMappingDraftRow,
 } from "@/src/lib/translationMappingDraft";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
@@ -51,10 +51,7 @@ export function TranslationMappingsField({
 }) {
 	const currentDraft = createTranslationMappingDraft({ rows: mappings });
 
-	const updateMapping = (
-		id: string,
-		patch: Partial<StoredTranslationMapping>,
-	) => {
+	const updateMapping = (id: string, patch: Partial<TranslationMapping>) => {
 		onChange(updateTranslationMappingDraftRow(currentDraft, id, patch).rows);
 	};
 

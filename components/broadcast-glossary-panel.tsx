@@ -26,6 +26,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getPublicConvexError } from "@/lib/expected-errors";
+import type { TranslationMapping } from "@/shared/translationMappings";
 import {
 	hydrateTranslationMappingDraft,
 	isTranslationMappingDraftDirty,
@@ -35,13 +36,12 @@ import {
 	type TranslationMappingDraft,
 	type TranslationMappingIdFactory,
 } from "@/src/lib/translationMappingDraft";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
 type UpdateTranslationMappings = (args: {
 	sessionId: Id<"sessions">;
-	translationMappings: StoredTranslationMapping[];
+	translationMappings: TranslationMapping[];
 	expectedRevisionId: Id<"translationMappingRevisions"> | null;
 }) => Promise<{
 	revisionId: Id<"translationMappingRevisions"> | null;
@@ -58,7 +58,7 @@ export function BroadcastGlossaryPanel({
 	onOpenChange: onOpenChangeProp,
 }: {
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
 	trigger?: "card" | "none";
@@ -94,7 +94,7 @@ export function BroadcastGlossaryPanelView({
 	updateTranslationMappings,
 }: {
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
 	trigger?: "card" | "none";
