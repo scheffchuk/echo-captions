@@ -1,5 +1,3 @@
-"use client";
-
 import { Check, ChevronDown } from "lucide-react";
 import { type ComponentProps, useState } from "react";
 import { Button } from "@/components/ui/button";

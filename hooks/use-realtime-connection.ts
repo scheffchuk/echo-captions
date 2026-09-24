@@ -1,10 +1,7 @@
-"use client";
-
 import {
 	AudioFormat,
 	CommitStrategy,
 	type ScribeCallbacks,
-	type ScribeStatus,
 	type UseScribeReturn,
 	useScribe,
 } from "@elevenlabs/react";
@@ -18,9 +15,7 @@ import {
 	RealtimeTranscriptionError,
 } from "@/hooks/broadcast-model";
 import { classifyMicrophoneError } from "@/hooks/microphone-devices";
-import { fromScribeCode } from "@/lib/languages";
-
-export type RealtimeConnectionState = ScribeStatus;
+import { fromScribeCode } from "@/shared/languages";
 
 const DISCONNECT_TIMEOUT_MS = 2_000;
 

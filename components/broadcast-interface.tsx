@@ -1,5 +1,3 @@
-"use client";
-
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft } from "lucide-react";
@@ -80,7 +78,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const [abandoningBroadcast, setAbandoningBroadcast] = useState(false);
 
 	const audienceLanguages = session?.audienceLanguages ?? [];
-	const audienceKey = audienceLanguages.join(",");
 	const defaultSourceLanguage = session?.spokenLanguages[0] ?? "en";
 	const broadcastStatus = session?.activeBroadcast?.status;
 
@@ -94,13 +91,14 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		null,
 	);
 
-	const defaultLanguagePair = audienceKey
-		? resolveLanguagePair(slug, audienceKey.split(","))
-		: null;
+	const defaultLanguagePair =
+		audienceLanguages.length > 0
+			? resolveLanguagePair(slug, audienceLanguages)
+			: null;
 
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 
-	const { commits: operatorCommits } = useSessionOperatorCommits(session?._id);
+	const operatorCommits = useSessionOperatorCommits(session?._id);
 
 	const isDual =
 		languagePair !== null &&
@@ -256,7 +254,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const title = localTitle ?? session?.title ?? "Untitled";
 	const description = localDescription ?? session?.description;
-	const audienceCodes = session?.audienceLanguages ?? [];
 
 	const showSetupHint =
 		!hasLostBroadcast &&
@@ -328,7 +325,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				sessionId: session._id,
 				initialMappings: session.translationMappings,
 				initialRevisionId: session.translationMappingRevisionId,
-				audienceCodes,
+				audienceCodes: audienceLanguages,
 				sheetOpen: toolsOpen,
 				onSheetOpenChange: setToolsOpen,
 			}

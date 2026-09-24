@@ -1,7 +1,4 @@
-"use client";
-
 import { useMutation } from "convex/react";
-import { Match } from "effect";
 import { BookText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -29,7 +26,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getPublicConvexError } from "@/lib/expected-errors";
-import { cn } from "@/lib/utils";
+import type { TranslationMapping } from "@/shared/translationMappings";
 import {
 	hydrateTranslationMappingDraft,
 	isTranslationMappingDraftDirty,
@@ -39,13 +36,12 @@ import {
 	type TranslationMappingDraft,
 	type TranslationMappingIdFactory,
 } from "@/src/lib/translationMappingDraft";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
 type UpdateTranslationMappings = (args: {
 	sessionId: Id<"sessions">;
-	translationMappings: StoredTranslationMapping[];
+	translationMappings: TranslationMapping[];
 	expectedRevisionId: Id<"translationMappingRevisions"> | null;
 }) => Promise<{
 	revisionId: Id<"translationMappingRevisions"> | null;
@@ -58,16 +54,14 @@ export function BroadcastGlossaryPanel({
 	initialRevisionId,
 	audienceCodes,
 	trigger = "card",
-	className,
 	open: openProp,
 	onOpenChange: onOpenChangeProp,
 }: {
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
-	trigger?: "card" | "button" | "none";
-	className?: string;
+	trigger?: "card" | "none";
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
 }) {
@@ -82,7 +76,6 @@ export function BroadcastGlossaryPanel({
 			initialRevisionId={initialRevisionId}
 			audienceCodes={audienceCodes}
 			trigger={trigger}
-			className={className}
 			open={openProp}
 			onOpenChange={onOpenChangeProp}
 			updateTranslationMappings={updateTranslationMappings}
@@ -96,17 +89,15 @@ export function BroadcastGlossaryPanelView({
 	initialRevisionId,
 	audienceCodes,
 	trigger = "card",
-	className,
 	open: openProp,
 	onOpenChange: onOpenChangeProp,
 	updateTranslationMappings,
 }: {
 	sessionId: Id<"sessions">;
-	initialMappings: StoredTranslationMapping[] | undefined;
+	initialMappings: TranslationMapping[] | undefined;
 	initialRevisionId: Id<"translationMappingRevisions"> | undefined;
 	audienceCodes: string[];
-	trigger?: "card" | "button" | "none";
-	className?: string;
+	trigger?: "card" | "none";
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
 	updateTranslationMappings: UpdateTranslationMappings;
@@ -254,23 +245,9 @@ export function BroadcastGlossaryPanelView({
 			? "No terms yet"
 			: `${savedMappingCount} term${savedMappingCount === 1 ? "" : "s"}`;
 
-	const triggerNode = Match.value(trigger).pipe(
-		Match.when("none", () => null),
-		Match.when("button", () => (
-			<DialogTrigger asChild>
-				<Button
-					variant="outline"
-					size="sm"
-					className={cn("gap-1.5", className)}
-					aria-label="Glossary"
-				>
-					<BookText className="size-4" />
-					Glossary
-				</Button>
-			</DialogTrigger>
-		)),
-		Match.orElse(() => (
-			<div className={cn("rounded-lg border border-border bg-card", className)}>
+	const triggerNode =
+		trigger === "none" ? null : (
+			<div className="rounded-lg border border-border bg-card">
 				<DialogTrigger asChild>
 					<button
 						type="button"
@@ -286,8 +263,7 @@ export function BroadcastGlossaryPanelView({
 					</button>
 				</DialogTrigger>
 			</div>
-		)),
-	);
+		);
 
 	return (
 		<>

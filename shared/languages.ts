@@ -38,15 +38,13 @@ export const COMMON_LANGUAGES = [
 	{ code: "te", name: "Telugu" },
 ] as const;
 
-export type LanguageCode = (typeof COMMON_LANGUAGES)[number]["code"];
+type LanguageCode = (typeof COMMON_LANGUAGES)[number]["code"];
 
 export const MAX_SPOKEN_LANGUAGES = 3;
 
-export const SUPPORTED_LANGUAGE_CODES = COMMON_LANGUAGES.map(
-	(language) => language.code,
+const SUPPORTED_SET = new Set<string>(
+	COMMON_LANGUAGES.map((language) => language.code),
 );
-
-const SUPPORTED_SET = new Set<string>(SUPPORTED_LANGUAGE_CODES);
 
 const SCRIBE_TO_INTERNAL = {
 	eng: "en",
@@ -100,7 +98,7 @@ export function normalizeLanguageCode(code: string): string {
 	return base === "zh" ? "zh" : base;
 }
 
-export function isSupportedLanguageCode(code: string): code is LanguageCode {
+function isSupportedLanguageCode(code: string): code is LanguageCode {
 	return SUPPORTED_SET.has(code);
 }
 
@@ -125,8 +123,4 @@ export function toGoogleCode(code: string): string {
 	if (normalized === "zh") return "zh-CN";
 
 	return normalized;
-}
-
-export function fromGoogleCode(code: string): string {
-	return normalizeLanguageCode(code);
 }

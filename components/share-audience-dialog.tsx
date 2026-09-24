@@ -1,9 +1,5 @@
-"use client";
-
 import { Check, Copy } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -13,6 +9,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getViewerUrl } from "@/lib/viewer-url";
 
 export function ShareAudienceDialog({
@@ -26,15 +23,16 @@ export function ShareAudienceDialog({
 	onOpenChange: (open: boolean) => void;
 	onContinue: () => void;
 }) {
-	const [copied, setCopied] = useState(false);
 	const viewerUrl = getViewerUrl(slug);
+	const { state: copyState, copy } = useCopyToClipboard();
+	const copied = copyState === "copied";
 
-	const copyLink = async () => {
-		await navigator.clipboard.writeText(viewerUrl);
-		setCopied(true);
-		toast.success("Viewer link copied");
-		setTimeout(() => setCopied(false), 2000);
-	};
+	const copyLink = () =>
+		copy(
+			() => viewerUrl,
+			"Viewer link copied",
+			"Couldn't copy link. Try again.",
+		);
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>

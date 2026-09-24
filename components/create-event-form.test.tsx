@@ -18,7 +18,7 @@ if (!Element.prototype.scrollIntoView) {
 
 const createSession = vi.fn();
 
-const onContinue = vi.fn();
+const onCreated = vi.fn();
 
 afterEach(() => {
 	cleanup();
@@ -35,7 +35,7 @@ async function openForm() {
 		<TooltipProvider>
 			<CreateEventFormView
 				createSession={createSession}
-				onContinue={onContinue}
+				onCreated={onCreated}
 			/>
 		</TooltipProvider>,
 	);
@@ -131,10 +131,7 @@ describe("CreateEventForm", () => {
 				{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 			],
 		});
-		await waitFor(() =>
-			expect(screen.getByText("Share with audience")).toBeInTheDocument(),
-		);
-		await user.click(screen.getByRole("button", { name: "Close" }));
+		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("session-123"));
 		await user.click(screen.getByRole("button", { name: "New event" }));
 		expect(screen.getByText("Event details")).toBeInTheDocument();
 		expect(screen.getByRole("textbox", { name: "Event Name" })).toHaveValue("");
@@ -218,15 +215,14 @@ describe("CreateEventForm", () => {
 		expect(screen.getByRole("textbox", { name: "Event Name" })).toHaveValue("");
 	});
 
-	it("navigates to the broadcast after continuing from the sharing flow", async () => {
+	it("closes the wizard and reports the created slug", async () => {
 		const user = await openForm();
 		await goToLanguages(user);
 		await user.click(screen.getByRole("button", { name: "Create event" }));
-		await user.click(screen.getByRole("button", { name: "Go to broadcast" }));
 
-		expect(onContinue).toHaveBeenCalledWith({
-			to: "/broadcast/$slug",
-			params: { slug: "session-123" },
-		});
+		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("session-123"));
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
 	});
 });

@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
@@ -240,7 +238,6 @@ export function useBroadcastRecording({
 		partialText: realtime.partialTranscript,
 		toggleRecording,
 		abandonRecording,
-		commandResult: coordinatorSnapshot.commandResult,
 		optimisticCaptures: coordinatorSnapshot.optimisticCaptures,
 		rejectedCaptures: coordinatorSnapshot.rejectedCaptures,
 		clearRejectedCaptures,

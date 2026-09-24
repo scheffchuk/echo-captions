@@ -1,8 +1,7 @@
-"use client";
-
-import { CircleHelp, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
+import { LabelWithHint } from "@/components/label-with-hint";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
 	Select,
@@ -11,12 +10,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { getCommonLanguageName } from "@/lib/languages";
+import type { TranslationMapping } from "@/shared/translationMappings";
 import {
 	addTranslationMappingDraftRow,
 	createTranslationMappingDraft,
@@ -26,11 +21,6 @@ import {
 	type TranslationMappingIdFactory,
 	updateTranslationMappingDraftRow,
 } from "@/src/lib/translationMappingDraft";
-import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
-
-export type { StoredTranslationMapping } from "@/src/lib/translationMappings";
-
-export type TranslationMapping = TranslationMappingDraftRow;
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
@@ -44,43 +34,6 @@ const issueMessages: Record<TranslationMappingDraftIssue["code"], string> = {
 	conflict: "Reload the glossary before saving.",
 };
 
-function FieldHint({ content }: { content: string }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<button
-					type="button"
-					tabIndex={-1}
-					className="inline-flex shrink-0 text-muted-foreground hover:text-foreground"
-					aria-label={content}
-				>
-					<CircleHelp className="size-4" />
-				</button>
-			</TooltipTrigger>
-			<TooltipContent side="right" className="max-w-56">
-				{content}
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-function LabelWithHint({
-	htmlFor,
-	label,
-	hint,
-}: {
-	htmlFor?: string;
-	label: string;
-	hint: string;
-}) {
-	return (
-		<FieldLabel htmlFor={htmlFor} className="inline-flex items-center gap-2">
-			{label}
-			<FieldHint content={hint} />
-		</FieldLabel>
-	);
-}
-
 export function TranslationMappingsField({
 	mappings,
 	audienceCodes,
@@ -89,19 +42,16 @@ export function TranslationMappingsField({
 	disabled = false,
 	idFactory = browserIdFactory,
 }: {
-	mappings: ReadonlyArray<TranslationMapping>;
+	mappings: ReadonlyArray<TranslationMappingDraftRow>;
 	audienceCodes: string[];
 	issues?: TranslationMappingDraftIssue[];
-	onChange: (mappings: TranslationMapping[]) => void;
+	onChange: (mappings: TranslationMappingDraftRow[]) => void;
 	disabled?: boolean;
 	idFactory?: TranslationMappingIdFactory;
 }) {
 	const currentDraft = createTranslationMappingDraft({ rows: mappings });
 
-	const updateMapping = (
-		id: string,
-		patch: Partial<StoredTranslationMapping>,
-	) => {
+	const updateMapping = (id: string, patch: Partial<TranslationMapping>) => {
 		onChange(updateTranslationMappingDraftRow(currentDraft, id, patch).rows);
 	};
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Completed on 2026-09-02. This record now describes the architecture that is in production code.
+Completed on 2026-09-02. Kept as a historical record. The browser registry steps were later reversed; see the ADR-0004 amendment for the current shape.
 
 ## Target shape
 

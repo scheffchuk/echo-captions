@@ -26,21 +26,21 @@ export class MicrophonePermissionDenied extends Schema.TaggedError<MicrophonePer
 	},
 ) {}
 
-export class MicrophoneUnsupported extends Schema.TaggedError<MicrophoneUnsupported>()(
+class MicrophoneUnsupported extends Schema.TaggedError<MicrophoneUnsupported>()(
 	"MicrophoneUnsupported",
 	{
 		message: Schema.String,
 	},
 ) {}
 
-export class MicrophoneUnavailable extends Schema.TaggedError<MicrophoneUnavailable>()(
+class MicrophoneUnavailable extends Schema.TaggedError<MicrophoneUnavailable>()(
 	"MicrophoneUnavailable",
 	{
 		message: Schema.String,
 	},
 ) {}
 
-export class MicrophoneInterrupted extends Schema.TaggedError<MicrophoneInterrupted>()(
+class MicrophoneInterrupted extends Schema.TaggedError<MicrophoneInterrupted>()(
 	"MicrophoneInterrupted",
 	{
 		message: Schema.String,
@@ -120,7 +120,7 @@ function cleanDeviceLabel(device: MediaDeviceInfo) {
 	return label.replace(/\s*\([^)]*\)/g, "").trim();
 }
 
-export function toAudioDevices(
+function toAudioDevices(
 	devices: readonly MediaDeviceInfo[],
 ): readonly AudioDevice[] {
 	return devices.flatMap((device) => {

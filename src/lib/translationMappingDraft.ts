@@ -6,14 +6,14 @@ import {
 	canonicalTranslationMappingsEqual,
 	type MappingPolicyIssue,
 	normalizeTranslationMapping,
-	type StoredTranslationMapping,
-} from "./translationMappings";
+	type TranslationMapping,
+} from "../../shared/translationMappings";
 
-export type TranslationMappingDraftRow = StoredTranslationMapping & {
+export type TranslationMappingDraftRow = TranslationMapping & {
 	id: string;
 };
 
-export type TranslationMappingDraftField = keyof StoredTranslationMapping;
+export type TranslationMappingDraftField = keyof TranslationMapping;
 
 export type TranslationMappingDraftIssueCode =
 	| "too_many_mappings"
@@ -33,14 +33,14 @@ export type TranslationMappingDraftIssue = {
 export type TranslationMappingDraft = {
 	rows: TranslationMappingDraftRow[];
 	baseRevisionId: Id<"translationMappingRevisions"> | null;
-	baseMappings: StoredTranslationMapping[];
+	baseMappings: TranslationMapping[];
 	conflict: boolean;
 };
 
 export type TranslationMappingIdFactory = () => string;
 
 export type TranslationMappingDraftProjection =
-	| { ok: true; mappings: StoredTranslationMapping[] }
+	| { ok: true; mappings: TranslationMapping[] }
 	| { ok: false; issues: TranslationMappingDraftIssue[] };
 
 const DRAFT_ISSUE_ROW = "$draft";
@@ -52,7 +52,7 @@ export function createTranslationMappingDraft({
 }: {
 	rows?: ReadonlyArray<TranslationMappingDraftRow>;
 	baseRevisionId?: Id<"translationMappingRevisions"> | null;
-	baseMappings?: ReadonlyArray<StoredTranslationMapping>;
+	baseMappings?: ReadonlyArray<TranslationMapping>;
 } = {}): TranslationMappingDraft {
 	return {
 		rows: [...rows],
@@ -63,7 +63,7 @@ export function createTranslationMappingDraft({
 }
 
 export function hydrateTranslationMappingDraft(
-	mappings: ReadonlyArray<StoredTranslationMapping> | undefined,
+	mappings: ReadonlyArray<TranslationMapping> | undefined,
 	baseRevisionId: Id<"translationMappingRevisions"> | null | undefined,
 	idFactory: TranslationMappingIdFactory,
 ): TranslationMappingDraft {
@@ -92,7 +92,7 @@ export function addTranslationMappingDraftRow(
 export function updateTranslationMappingDraftRow(
 	draft: TranslationMappingDraft,
 	rowId: string,
-	patch: Partial<StoredTranslationMapping>,
+	patch: Partial<TranslationMapping>,
 ): TranslationMappingDraft {
 	return {
 		...draft,
@@ -120,7 +120,7 @@ function issue(
 	return { rowId, field, code };
 }
 
-function rowIsBlank(row: StoredTranslationMapping): boolean {
+function rowIsBlank(row: TranslationMapping): boolean {
 	return (
 		!row.term.trim() && !row.targetLanguage.trim() && !row.translation.trim()
 	);
@@ -151,15 +151,15 @@ function issueFromPolicy(
 
 function contentForComparison(
 	rows: ReadonlyArray<TranslationMappingDraftRow>,
-): StoredTranslationMapping[] {
+): TranslationMapping[] {
 	return rows.flatMap((row) =>
 		rowIsBlank(row) ? [] : [normalizeTranslationMapping(row)],
 	);
 }
 
 function mappingsMatch(
-	left: StoredTranslationMapping,
-	right: StoredTranslationMapping,
+	left: TranslationMapping,
+	right: TranslationMapping,
 ): boolean {
 	const normalizedLeft = normalizeTranslationMapping(left);
 	const normalizedRight = normalizeTranslationMapping(right);
@@ -222,7 +222,7 @@ export function projectTranslationMappingDraft(
 
 export function reconcileTranslationMappingDraft(
 	draft: TranslationMappingDraft,
-	latestMappings: ReadonlyArray<StoredTranslationMapping> | undefined,
+	latestMappings: ReadonlyArray<TranslationMapping> | undefined,
 	latestRevisionId: Id<"translationMappingRevisions"> | null | undefined,
 	idFactory: TranslationMappingIdFactory,
 	audienceCodes?: ReadonlyArray<string>,

@@ -1,27 +1,25 @@
-"use client";
-
 import { Check, Copy, Link2, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getViewerUrl } from "@/lib/viewer-url";
 
 export function SharePanel({ slug }: { slug: string }) {
-	const [copied, setCopied] = useState(false);
 	const viewerUrl = getViewerUrl(slug);
+	const { state: copyState, copy } = useCopyToClipboard();
+	const copied = copyState === "copied";
 
-	const copyLink = async () => {
-		await navigator.clipboard.writeText(viewerUrl);
-		setCopied(true);
-		toast.success("Viewer link copied");
-		setTimeout(() => setCopied(false), 2000);
-	};
+	const copyLink = () =>
+		copy(
+			() => viewerUrl,
+			"Viewer link copied",
+			"Couldn't copy link. Try again.",
+		);
 
 	return (
 		<div

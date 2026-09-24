@@ -1,6 +1,6 @@
-import { normalizeLanguageCode } from "../../shared/languages";
+import { normalizeLanguageCode } from "./languages";
 
-export type StoredTranslationMapping = {
+export type TranslationMapping = {
 	term: string;
 	targetLanguage: string;
 	translation: string;
@@ -22,16 +22,16 @@ export type MappingPolicyIssue = {
 	code: MappingPolicyIssueCode;
 	message: string;
 	index?: number;
-	field?: keyof StoredTranslationMapping;
+	field?: keyof TranslationMapping;
 };
 
 export type MappingPolicyResult =
-	| { ok: true; mappings: StoredTranslationMapping[] }
+	| { ok: true; mappings: TranslationMapping[] }
 	| { ok: false; issues: MappingPolicyIssue[] };
 
 export function normalizeTranslationMapping(
-	mapping: StoredTranslationMapping,
-): StoredTranslationMapping {
+	mapping: TranslationMapping,
+): TranslationMapping {
 	return {
 		term: mapping.term.trim().normalize("NFC"),
 		targetLanguage: normalizeLanguageCode(mapping.targetLanguage),
@@ -51,11 +51,11 @@ function compareStrings(left: string, right: string): number {
 	return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function normalizedMappingKey(mapping: StoredTranslationMapping): string {
+function normalizedMappingKey(mapping: TranslationMapping): string {
 	return `${mapping.targetLanguage}\u0000${folded(mapping.term)}`;
 }
 
-function mappingIsBlank(mapping: StoredTranslationMapping): boolean {
+function mappingIsBlank(mapping: TranslationMapping): boolean {
 	return !mapping.term && !mapping.targetLanguage && !mapping.translation;
 }
 
@@ -65,7 +65,7 @@ function mappingIsBlank(mapping: StoredTranslationMapping): boolean {
  * partially filled row is rejected so it can never become an implicit rule.
  */
 export function canonicalizeTranslationMappings(
-	mappings: ReadonlyArray<StoredTranslationMapping>,
+	mappings: ReadonlyArray<TranslationMapping>,
 	audienceLanguages: ReadonlyArray<string>,
 ): MappingPolicyResult {
 	const normalizedMappings = mappings.map(normalizeTranslationMapping);
@@ -86,7 +86,7 @@ export function canonicalizeTranslationMappings(
 	);
 
 	const seen = new Set<string>();
-	const canonical: StoredTranslationMapping[] = [];
+	const canonical: TranslationMapping[] = [];
 
 	for (const [index, mapping] of normalizedMappings.entries()) {
 		if (mappingIsBlank(mapping)) {
@@ -170,8 +170,8 @@ export function canonicalizeTranslationMappings(
 }
 
 function comparableMappings(
-	mappings: ReadonlyArray<StoredTranslationMapping>,
-): StoredTranslationMapping[] {
+	mappings: ReadonlyArray<TranslationMapping>,
+): TranslationMapping[] {
 	return mappings
 		.flatMap((mapping) => {
 			const normalized = normalizeTranslationMapping(mapping);
@@ -192,8 +192,8 @@ function comparableMappings(
 }
 
 export function canonicalTranslationMappingsEqual(
-	left: ReadonlyArray<StoredTranslationMapping>,
-	right: ReadonlyArray<StoredTranslationMapping>,
+	left: ReadonlyArray<TranslationMapping>,
+	right: ReadonlyArray<TranslationMapping>,
 ): boolean {
 	const leftComparable = comparableMappings(left);
 	const rightComparable = comparableMappings(right);
@@ -210,9 +210,9 @@ export function canonicalTranslationMappingsEqual(
 }
 
 export function filterMappingsForAudience(
-	mappings: ReadonlyArray<StoredTranslationMapping>,
+	mappings: ReadonlyArray<TranslationMapping>,
 	audienceLanguages: ReadonlyArray<string>,
-): StoredTranslationMapping[] {
+): TranslationMapping[] {
 	const audienceSet = new Set(
 		audienceLanguages.map((language) => normalizeLanguageCode(language)),
 	);
