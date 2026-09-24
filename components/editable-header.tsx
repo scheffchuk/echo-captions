@@ -1,5 +1,3 @@
-"use client";
-
 import { Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";

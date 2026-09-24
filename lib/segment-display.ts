@@ -5,8 +5,6 @@ export type CaptionSegment = {
 	status: "translating" | "translated" | "failed";
 };
 
-export type CaptionLine = CaptionSegment & { id: string };
-
 export function getSegmentDisplay(segment: CaptionSegment, code: string) {
 	if (code === segment.sourceLanguage) {
 		return { text: segment.sourceText, pending: false };

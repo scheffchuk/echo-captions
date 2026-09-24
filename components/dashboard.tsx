@@ -1,5 +1,3 @@
-"use client";
-
 import { Link } from "@tanstack/react-router";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import {

@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery } from "convex/react";
 import { useState } from "react";
 import { CaptionColumnShell, CaptionFeed } from "@/components/caption-feed";

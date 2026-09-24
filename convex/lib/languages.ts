@@ -1,5 +1,4 @@
 export {
-	fromGoogleCode,
 	fromScribeCode,
 	isValidLanguageCode,
 	MAX_SPOKEN_LANGUAGES,

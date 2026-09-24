@@ -1,10 +1,3 @@
-export {
-	COMMON_LANGUAGES,
-	fromScribeCode,
-	MAX_SPOKEN_LANGUAGES,
-	normalizeLanguageCode,
-} from "@/shared/languages";
-
 import { COMMON_LANGUAGES, normalizeLanguageCode } from "@/shared/languages";
 
 export type LanguagePair = [string] | [string, string];
@@ -13,7 +6,7 @@ export function getCommonLanguageName(code: string): string {
 	return COMMON_LANGUAGES.find((lang) => lang.code === code)?.name ?? code;
 }
 
-export function matchBrowserLocale(
+function matchBrowserLocale(
 	navigatorLanguage: string,
 	audienceLanguages: string[],
 ): string | undefined {

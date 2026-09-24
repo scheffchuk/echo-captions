@@ -1,5 +1,3 @@
-"use client";
-
 import { CircleHelp, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
@@ -27,10 +25,6 @@ import {
 	updateTranslationMappingDraftRow,
 } from "@/src/lib/translationMappingDraft";
 import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
-
-export type { StoredTranslationMapping } from "@/src/lib/translationMappings";
-
-export type TranslationMapping = TranslationMappingDraftRow;
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
 
@@ -89,10 +83,10 @@ export function TranslationMappingsField({
 	disabled = false,
 	idFactory = browserIdFactory,
 }: {
-	mappings: ReadonlyArray<TranslationMapping>;
+	mappings: ReadonlyArray<TranslationMappingDraftRow>;
 	audienceCodes: string[];
 	issues?: TranslationMappingDraftIssue[];
-	onChange: (mappings: TranslationMapping[]) => void;
+	onChange: (mappings: TranslationMappingDraftRow[]) => void;
 	disabled?: boolean;
 	idFactory?: TranslationMappingIdFactory;
 }) {

@@ -1,11 +1,8 @@
-"use client";
-
 import { BookText, Check, Copy, MoreHorizontal, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { BroadcastGlossaryPanel } from "@/components/broadcast-glossary-panel";
-import type { StoredTranslationMapping } from "@/components/translation-mappings-field";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -22,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getViewerUrl } from "@/lib/viewer-url";
+import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 export function BroadcastLiveExtras({
 	slug,

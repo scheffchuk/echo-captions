@@ -1,5 +1,3 @@
-"use client";
-
 import { Check, Copy, Link2, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";

@@ -1,9 +1,6 @@
-"use client";
-
 import { PanelRight } from "lucide-react";
 import { BroadcastGlossaryPanel } from "@/components/broadcast-glossary-panel";
 import { SharePanel } from "@/components/share-panel";
-import type { StoredTranslationMapping } from "@/components/translation-mappings-field";
 import { Button } from "@/components/ui/button";
 import {
 	Sheet,
@@ -15,6 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
+import type { StoredTranslationMapping } from "@/src/lib/translationMappings";
 
 export function BroadcastSessionTools({
 	slug,

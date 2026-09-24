@@ -1,5 +1,3 @@
-"use client";
-
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft } from "lucide-react";
@@ -100,7 +98,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const languagePair = userLanguagePair ?? defaultLanguagePair;
 
-	const { commits: operatorCommits } = useSessionOperatorCommits(session?._id);
+	const operatorCommits = useSessionOperatorCommits(session?._id);
 
 	const isDual =
 		languagePair !== null &&
@@ -256,7 +254,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 
 	const title = localTitle ?? session?.title ?? "Untitled";
 	const description = localDescription ?? session?.description;
-	const audienceCodes = session?.audienceLanguages ?? [];
 
 	const showSetupHint =
 		!hasLostBroadcast &&
@@ -328,7 +325,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				sessionId: session._id,
 				initialMappings: session.translationMappings,
 				initialRevisionId: session.translationMappingRevisionId,
-				audienceCodes,
+				audienceCodes: audienceLanguages,
 				sheetOpen: toolsOpen,
 				onSheetOpenChange: setToolsOpen,
 			}

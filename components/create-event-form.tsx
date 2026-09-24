@@ -1,5 +1,3 @@
-"use client";
-
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
@@ -51,12 +49,9 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/convex/_generated/api";
 import { getPublicConvexError } from "@/lib/expected-errors";
-import {
-	COMMON_LANGUAGES,
-	getCommonLanguageName,
-	MAX_SPOKEN_LANGUAGES,
-} from "@/lib/languages";
+import { getCommonLanguageName } from "@/lib/languages";
 import { cn } from "@/lib/utils";
+import { COMMON_LANGUAGES, MAX_SPOKEN_LANGUAGES } from "@/shared/languages";
 import {
 	createTranslationMappingDraft,
 	projectTranslationMappingDraft,

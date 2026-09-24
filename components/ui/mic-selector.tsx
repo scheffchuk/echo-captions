@@ -1,5 +1,3 @@
-"use client";
-
 import { Cause, Effect, Exit, Option, Stream } from "effect";
 import { Check, ChevronsUpDown, Mic } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

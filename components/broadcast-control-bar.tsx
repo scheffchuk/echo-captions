@@ -1,5 +1,3 @@
-"use client";
-
 import { Loader2, Square } from "lucide-react";
 import { LanguagePairPicker } from "@/components/language-pair-picker";
 import { Button } from "@/components/ui/button";
@@ -35,7 +33,6 @@ export function BroadcastControlBar({
 	audienceLanguages,
 	onLanguageChange,
 	onMicError,
-	disabled,
 	className,
 }: {
 	deviceId: string;
@@ -47,15 +44,14 @@ export function BroadcastControlBar({
 	audienceLanguages: string[];
 	onLanguageChange: (pair: LanguagePair) => void;
 	onMicError?: (message: string) => void;
-	disabled?: boolean;
 	className?: string;
 }) {
 	const isVoiceActive = voiceState === "recording";
 	const isConnecting = voiceState === "connecting";
 	const isLost = broadcastStatus === "lost";
 	const isStopping = broadcastStatus === "stopping";
-	const micSelectorDisabled = disabled || isVoiceActive || isConnecting;
-	const recordDisabled = disabled || !deviceId || isConnecting || isStopping;
+	const micSelectorDisabled = isVoiceActive || isConnecting;
+	const recordDisabled = !deviceId || isConnecting || isStopping;
 
 	const recordLabel = isLost
 		? "Resume"
