@@ -12,31 +12,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { api } from "@/convex/_generated/api";
+import { useLanguagePairPreference } from "@/hooks/use-language-pair-preference";
 import { useSessionCaptionFeed } from "@/hooks/use-session-caption-feed";
-import { getCommonLanguageName, type LanguagePair } from "@/lib/languages";
-import {
-	getStoredTextSize,
-	resolveViewerLanguagePair,
-	setStoredLanguagePair,
-	setStoredTextSize,
-} from "@/lib/viewer-preferences";
+import { getCommonLanguageName } from "@/lib/languages";
+import { getStoredTextSize, setStoredTextSize } from "@/lib/viewer-preferences";
 
 export function ViewerInterface({ slug }: { slug: string }) {
 	const session = useQuery(api.sessions.getBySlug, { slug });
 	const audienceLanguages: string[] = session?.audienceLanguages ?? [];
 
-	const [userLanguagePair, setUserLanguagePair] = useState<LanguagePair | null>(
-		null,
-	);
-
 	const [textScale, setTextScale] = useState(() => getStoredTextSize());
 
-	const defaultLanguagePair =
-		audienceLanguages.length > 0
-			? resolveViewerLanguagePair(slug, audienceLanguages)
-			: null;
-
-	const languagePair = userLanguagePair ?? defaultLanguagePair;
+	const { languagePair, changeLanguagePair } = useLanguagePairPreference(
+		slug,
+		audienceLanguages,
+		"viewer",
+	);
 
 	const { feedItems, status } = useSessionCaptionFeed(session?._id);
 
@@ -51,11 +42,6 @@ export function ViewerInterface({ slug }: { slug: string }) {
 				languagePair?.[0] ?? audienceLanguages[0],
 				languagePair?.[0] ?? audienceLanguages[0],
 			];
-
-	const changeLanguagePair = (next: LanguagePair) => {
-		setUserLanguagePair(next);
-		setStoredLanguagePair(slug, next);
-	};
 
 	const changeTextScale = (delta: number) => {
 		setTextScale((current) => {

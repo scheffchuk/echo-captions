@@ -491,6 +491,37 @@ describe("Broadcast lifecycle", () => {
 		expect(reservationAfterDelete?.slug).toBe(created.slug);
 	});
 
+	it("deletes Session children across scheduled batches", async () => {
+		vi.useFakeTimers();
+		const t = makeTest();
+		const { operator, sessionId } = await seedOperator(t);
+
+		await t.run(async (ctx) => {
+			for (let revision = 1; revision <= 101; revision++) {
+				await ctx.db.insert("translationMappingRevisions", {
+					sessionId,
+					revision,
+					mappings: [],
+				});
+			}
+		});
+
+		await operator.mutation(api.sessions.deleteSession, { sessionId });
+		await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+		const remaining = await t.run(async (ctx) => ({
+			session: await ctx.db.get("sessions", sessionId),
+			revision: await ctx.db
+				.query("translationMappingRevisions")
+				.withIndex("by_session_id_and_revision", (q) =>
+					q.eq("sessionId", sessionId),
+				)
+				.first(),
+		}));
+
+		expect(remaining).toEqual({ session: null, revision: null });
+	});
+
 	it("protects Session deletion until a Lost Broadcast is abandoned", async () => {
 		vi.useFakeTimers();
 		const t = makeTest();

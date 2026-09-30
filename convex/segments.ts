@@ -8,11 +8,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
 import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
 import { atPublicEdge } from "./lib/publicEdge";
-import {
-	getOwnedSession,
-	SessionDeleting,
-	sessionErrorCodes,
-} from "./lib/sessions";
+import { getAvailableOwnedSession, sessionErrorCodes } from "./lib/sessions";
 
 const MAX_TRANSCRIPT_SEGMENTS = 1_000;
 
@@ -42,13 +38,7 @@ const segmentValidator = v.object({
 
 async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	const ownerId = await requireCurrentOperatorId(ctx);
-	const session = await getOwnedSession(ctx, sessionId, ownerId);
-
-	if (session.deletionRequestedAt !== undefined) {
-		throw new SessionDeleting({
-			message: "Session is being deleted",
-		});
-	}
+	await getAvailableOwnedSession(ctx, sessionId, ownerId);
 
 	const segments = await ctx.db
 		.query("segments")

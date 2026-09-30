@@ -53,15 +53,25 @@ export function setStoredLanguagePair(slug: string, pair: LanguagePair) {
 	localStorage.setItem(`${LANGUAGE_PAIR_PREFIX}${slug}`, JSON.stringify(pair));
 }
 
+export function isLanguagePairAvailable(
+	pair: LanguagePair,
+	audienceLanguages: readonly string[],
+): boolean {
+	return (
+		pair.every((code) => audienceLanguages.includes(code)) &&
+		(pair.length === 1 || pair[0] !== pair[1])
+	);
+}
+
 function storedPairForAudience(
 	slug: string,
-	audienceLanguages: string[],
+	audienceLanguages: readonly string[],
 ): LanguagePair | null {
 	const stored = getStoredLanguagePair(slug);
 
 	if (!stored) return null;
 
-	if (stored.every((code) => audienceLanguages.includes(code))) return stored;
+	if (isLanguagePairAvailable(stored, audienceLanguages)) return stored;
 	removeStoredLanguagePair(slug);
 
 	return null;

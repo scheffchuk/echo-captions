@@ -48,6 +48,20 @@ export async function getOwnedSession(
 	return session;
 }
 
+export async function getAvailableOwnedSession(
+	ctx: QueryCtx | MutationCtx,
+	sessionId: Id<"sessions">,
+	ownerId: Id<"users">,
+) {
+	const session = await getOwnedSession(ctx, sessionId, ownerId);
+
+	if (session.deletionRequestedAt !== undefined) {
+		throw new SessionDeleting({ message: "Session is being deleted" });
+	}
+
+	return session;
+}
+
 function generateSlug(): string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
 	let slug = "";

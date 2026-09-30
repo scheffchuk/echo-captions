@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { toast } from "sonner";
 import { BroadcastControlBar } from "@/components/broadcast-control-bar";
 import { BroadcastLiveExtras } from "@/components/broadcast-live-extras";
@@ -34,21 +34,17 @@ import {
 	toBroadcastCommandError,
 } from "@/hooks/broadcast-model";
 import { useBroadcastRecording } from "@/hooks/use-broadcast-recording";
+import { useLanguagePairPreference } from "@/hooks/use-language-pair-preference";
 import { useSessionOperatorCommits } from "@/hooks/use-session-operator-commits";
 import {
 	getStoredMicDevice,
 	setStoredMicDevice,
 } from "@/lib/broadcast-preferences";
-import type { LanguagePair } from "@/lib/languages";
 import {
 	mergeOperatorCommitProjections,
 	operatorCommitsToFeedItems,
 } from "@/lib/operator-commit-feed";
 import { cn } from "@/lib/utils";
-import {
-	resolveLanguagePair,
-	setStoredLanguagePair,
-} from "@/lib/viewer-preferences";
 
 function isEditableTarget(target: EventTarget | null) {
 	if (!(target instanceof HTMLElement)) return false;
@@ -87,16 +83,11 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const hasLostBroadcast =
 		lostBroadcastId !== null && lostBroadcastId !== undefined;
 
-	const [userLanguagePair, setUserLanguagePair] = useState<LanguagePair | null>(
-		null,
+	const { languagePair, changeLanguagePair } = useLanguagePairPreference(
+		slug,
+		audienceLanguages,
+		"operator",
 	);
-
-	const defaultLanguagePair =
-		audienceLanguages.length > 0
-			? resolveLanguagePair(slug, audienceLanguages)
-			: null;
-
-	const languagePair = userLanguagePair ?? defaultLanguagePair;
 
 	const operatorCommits = useSessionOperatorCommits(session?._id);
 
@@ -201,50 +192,44 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		window.setTimeout(() => URL.revokeObjectURL(url), 0);
 	};
 
-	const isConnectedRef = useRef(isConnected);
-	isConnectedRef.current = isConnected;
-	const stopConfirmOpenRef = useRef(stopConfirmOpen);
-	stopConfirmOpenRef.current = stopConfirmOpen;
-	const toolsOpenRef = useRef(toolsOpen);
-	toolsOpenRef.current = toolsOpen;
-	const requestToggleRecordingRef = useRef(requestToggleRecording);
-	requestToggleRecordingRef.current = requestToggleRecording;
+	const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+		if (event.code !== "Space" && event.key !== " ") return;
+
+		if (event.repeat) return;
+
+		if (isEditableTarget(event.target)) return;
+
+		if (
+			event.target instanceof HTMLElement &&
+			event.target.closest('[role="dialog"], [role="alertdialog"]')
+		) {
+			return;
+		}
+
+		if (stopConfirmOpen || toolsOpen) return;
+		event.preventDefault();
+		requestToggleRecording();
+	});
 
 	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.code !== "Space" && event.key !== " ") return;
+		const listener = (event: KeyboardEvent) => onKeyDown(event);
+		window.addEventListener("keydown", listener);
 
-			if (event.repeat) return;
-
-			if (isEditableTarget(event.target)) return;
-
-			if (
-				event.target instanceof HTMLElement &&
-				event.target.closest('[role="dialog"], [role="alertdialog"]')
-			) {
-				return;
-			}
-
-			if (stopConfirmOpenRef.current || toolsOpenRef.current) return;
-			event.preventDefault();
-			requestToggleRecordingRef.current();
-		};
-
-		window.addEventListener("keydown", onKeyDown);
-
-		return () => window.removeEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", listener);
 	}, []);
 
+	const onBeforeUnload = useEffectEvent((event: BeforeUnloadEvent) => {
+		if (!isConnected) return;
+		event.preventDefault();
+		event.returnValue = "";
+	});
+
 	useEffect(() => {
-		const onBeforeUnload = (event: BeforeUnloadEvent) => {
-			if (!isConnectedRef.current) return;
-			event.preventDefault();
-			event.returnValue = "";
-		};
+		const listener = (event: BeforeUnloadEvent) => onBeforeUnload(event);
 
-		window.addEventListener("beforeunload", onBeforeUnload);
+		window.addEventListener("beforeunload", listener);
 
-		return () => window.removeEventListener("beforeunload", onBeforeUnload);
+		return () => window.removeEventListener("beforeunload", listener);
 	}, []);
 
 	const handleDeviceChange = (nextDeviceId: string) => {
@@ -292,11 +277,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				Finishing captions from the previous broadcast…
 			</div>
 		) : null;
-
-	const changeLanguagePair = (next: LanguagePair) => {
-		setUserLanguagePair(next);
-		setStoredLanguagePair(slug, next);
-	};
 
 	const persistTitle = async (nextTitle: string) => {
 		setLocalTitle(nextTitle);
