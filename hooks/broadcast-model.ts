@@ -26,7 +26,10 @@ export class RealtimeTranscriptionError extends Schema.TaggedError<RealtimeTrans
 	{ message: Schema.String },
 ) {}
 
-export type BroadcastCommand = { kind: "start" } | { kind: "stop" };
+export type BroadcastCommand =
+	| { kind: "start" }
+	| { kind: "stop"; broadcastId: Id<"broadcasts"> }
+	| { kind: "abandon"; broadcastId: Id<"broadcasts"> };
 
 export type BroadcastCommandResult = {
 	kind: BroadcastCommand["kind"];

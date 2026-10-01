@@ -28,11 +28,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { formatRejectedCaptures } from "@/hooks/broadcast-capture";
-import {
-	ignorePresentedBroadcastError,
-	toBroadcastCommandError,
-} from "@/hooks/broadcast-model";
+import { ignorePresentedBroadcastError } from "@/hooks/broadcast-model";
 import { useBroadcastRecording } from "@/hooks/use-broadcast-recording";
 import { useLanguagePairPreference } from "@/hooks/use-language-pair-preference";
 import { useSessionOperatorCommits } from "@/hooks/use-session-operator-commits";
@@ -60,7 +58,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const session = useQuery(api.sessions.getMineBySlug, { slug });
 	const updateTitle = useMutation(api.sessions.updateTitle);
 	const updateDescription = useMutation(api.sessions.updateDescription);
-	const abandonBroadcast = useMutation(api.broadcasts.abandon);
 
 	const [deviceId, setDeviceId] = useState(
 		() => getStoredMicDevice(slug) ?? "",
@@ -69,9 +66,16 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	const [localTitle, setLocalTitle] = useState<string | null>(null);
 	const [localDescription, setLocalDescription] = useState<string | null>(null);
 	const [toolsOpen, setToolsOpen] = useState(false);
-	const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
-	const [abandonConfirmOpen, setAbandonConfirmOpen] = useState(false);
-	const [abandoningBroadcast, setAbandoningBroadcast] = useState(false);
+
+	const [stopConfirmBroadcastId, setStopConfirmBroadcastId] =
+		useState<Id<"broadcasts"> | null>(null);
+
+	const stopConfirmOpen = stopConfirmBroadcastId !== null;
+
+	const [abandonConfirmBroadcastId, setAbandonConfirmBroadcastId] =
+		useState<Id<"broadcasts"> | null>(null);
+
+	const abandonConfirmOpen = abandonConfirmBroadcastId !== null;
 
 	const audienceLanguages = session?.audienceLanguages ?? [];
 	const defaultSourceLanguage = session?.spokenLanguages[0] ?? "en";
@@ -110,24 +114,26 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		isConnected,
 		voiceState,
 		partialText,
-		toggleRecording,
-		abandonRecording,
+		run,
+		pendingCommand,
+		activeBroadcastId,
 		optimisticCaptures,
 		rejectedCaptures,
 		clearRejectedCaptures,
 	} = useBroadcastRecording({
 		sessionId: session?._id,
 		deviceId,
-		broadcastStatus,
 		recoverableBroadcastId: lostBroadcastId,
 		onError: toast.error,
 	});
+
+	const abandoningBroadcast = pendingCommand === "abandon";
 
 	const feedItems = operatorCommitsToFeedItems(
 		mergeOperatorCommitProjections(operatorCommits, optimisticCaptures),
 	);
 
-	const requestToggleRecording = () => {
+	const requestRecording = () => {
 		if (voiceState === "connecting") return;
 
 		if (hasLostBroadcast) {
@@ -137,13 +143,15 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				return;
 			}
 
-			void toggleRecording().catch(ignorePresentedBroadcastError);
+			void run({ kind: "start" }).catch(ignorePresentedBroadcastError);
 
 			return;
 		}
 
 		if (isConnected) {
-			setStopConfirmOpen(true);
+			setStopConfirmBroadcastId(
+				activeBroadcastId ?? session?.activeBroadcast?._id ?? null,
+			);
 
 			return;
 		}
@@ -154,27 +162,26 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 			return;
 		}
 
-		void toggleRecording().catch(ignorePresentedBroadcastError);
+		void run({ kind: "start" }).catch(ignorePresentedBroadcastError);
 	};
 
 	const confirmStop = () => {
-		setStopConfirmOpen(false);
-		void toggleRecording().catch(ignorePresentedBroadcastError);
+		if (!stopConfirmBroadcastId) return;
+		void run({ kind: "stop", broadcastId: stopConfirmBroadcastId }).catch(
+			ignorePresentedBroadcastError,
+		);
+		setStopConfirmBroadcastId(null);
 	};
 
 	const confirmAbandon = async () => {
-		if (!lostBroadcastId) return;
-		setAbandoningBroadcast(true);
+		if (!abandonConfirmBroadcastId) return;
 
 		try {
-			await abandonBroadcast({ broadcastId: lostBroadcastId });
-			abandonRecording();
-			setAbandonConfirmOpen(false);
-			toast.success("Lost broadcast abandoned. Caption order is sealed.");
+			await run({ kind: "abandon", broadcastId: abandonConfirmBroadcastId });
+			setAbandonConfirmBroadcastId(null);
+			toast.success("Lost broadcast abandoned.");
 		} catch (error) {
-			toast.error(toBroadcastCommandError(error).message);
-		} finally {
-			setAbandoningBroadcast(false);
+			ignorePresentedBroadcastError(error);
 		}
 	};
 
@@ -206,9 +213,9 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 			return;
 		}
 
-		if (stopConfirmOpen || toolsOpen) return;
+		if (stopConfirmOpen || abandonConfirmOpen || toolsOpen) return;
 		event.preventDefault();
-		requestToggleRecording();
+		requestRecording();
 	});
 
 	useEffect(() => {
@@ -216,20 +223,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		window.addEventListener("keydown", listener);
 
 		return () => window.removeEventListener("keydown", listener);
-	}, []);
-
-	const onBeforeUnload = useEffectEvent((event: BeforeUnloadEvent) => {
-		if (!isConnected) return;
-		event.preventDefault();
-		event.returnValue = "";
-	});
-
-	useEffect(() => {
-		const listener = (event: BeforeUnloadEvent) => onBeforeUnload(event);
-
-		window.addEventListener("beforeunload", listener);
-
-		return () => window.removeEventListener("beforeunload", listener);
 	}, []);
 
 	const handleDeviceChange = (nextDeviceId: string) => {
@@ -366,7 +359,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 			<div className="flex shrink-0 gap-2">
 				<Button
 					size="sm"
-					onClick={requestToggleRecording}
+					onClick={requestRecording}
 					disabled={voiceState === "connecting" || !deviceId}
 				>
 					Resume
@@ -374,7 +367,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				<Button
 					size="sm"
 					variant="outline"
-					onClick={() => setAbandonConfirmOpen(true)}
+					onClick={() => setAbandonConfirmBroadcastId(lostBroadcastId ?? null)}
 					disabled={abandoningBroadcast}
 				>
 					Abandon tail
@@ -475,7 +468,7 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 						onDeviceChange={handleDeviceChange}
 						voiceState={voiceState}
 						broadcastStatus={broadcastStatus}
-						onRecordPress={requestToggleRecording}
+						onRecordPress={requestRecording}
 						languagePair={
 							languagePair ?? [audienceLanguages[0] ?? defaultSourceLanguage]
 						}
@@ -485,7 +478,12 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 					/>
 				</div>
 
-				<AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+				<AlertDialog
+					open={stopConfirmOpen}
+					onOpenChange={(open) => {
+						if (!open) setStopConfirmBroadcastId(null);
+					}}
+				>
 					<AlertDialogContent>
 						<AlertDialogHeader>
 							<AlertDialogTitle>Stop broadcasting?</AlertDialogTitle>
@@ -505,7 +503,8 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 				<AlertDialog
 					open={abandonConfirmOpen}
 					onOpenChange={(open) => {
-						if (!abandoningBroadcast) setAbandonConfirmOpen(open);
+						if (!abandoningBroadcast && !open)
+							setAbandonConfirmBroadcastId(null);
 					}}
 				>
 					<AlertDialogContent>

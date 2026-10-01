@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-28); amended 2026-09-21
+Accepted (2026-08-28); amended 2026-09-21 and 2026-10-01
 
 ## Context
 
@@ -50,3 +50,14 @@ The browser Effect registry was removed (commit `d5e1101`). This supersedes the 
 - Rejected captures live in that provider's owner for the lifetime of the rendered tree. They are still not durably journaled.
 - Browser voice state derives from ElevenLabs status, Convex subscriptions, and the Broadcast coordinator's serialized command result.
 - Microphone enumeration still uses Effect and Stream in `hooks/microphone-devices.ts`. The mic selector owns its lifecycle.
+
+## Amendment (2026-10-01)
+
+The recording hook owns command execution and mounted lifetime together. The screen owns confirmations and successful-completion presentation.
+
+- Start, target-specific stop, and target-specific abandonment share one command gate. Competing commands fail with a typed conflict. Admitted commands retain their Session, Broadcast target, and transport bindings through reactive updates.
+- Each mounted Session creates a fresh coordinator. Navigation and `pagehide` initiate media release immediately, cancel heartbeat, and attempt normal stop without updating detached React state. Late activation responses are stopped using their returned identity when disconnect is acknowledged; missing acknowledgement leaves server resolution to heartbeat expiry.
+- Abandonment prevents new caption acceptance from admission onward. Finalized callbacks received before disconnect acknowledgement or its timeout remain Rejected captures for export. Outstanding acceptance still removes successfully Accepted text from the application-lifetime owner, and explicit discard remains respected.
+- Server-accepted abandonment remains successful after a disconnect timeout; that timeout is presented once as a separate cleanup error. Server rejection still releases media and retains Rejected captures, while leaving server recovery available.
+- Native Convex and ElevenLabs hooks retain their state ownership. Feature-local production and controlled transport adapters let tests render the same recording and realtime hooks under Strict Mode, departure, and remounts. Connection-scoped event handlers prevent callbacks from an earlier connection reaching a later generation.
+- The installed Scribe SDK acquires microphone resources asynchronously after socket readiness. Its adapter makes close idempotent and releases audio cleanup installed after departure. After an acknowledgement timeout, capture admission closes but a mounted hook waits for the native close event before reconnecting, because that SDK event resets its connection reference. Native SDK tests run with browser export conditions and controlled browser primitives.

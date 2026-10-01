@@ -19,7 +19,7 @@ describe("useRealtimeConnection callback identity", () => {
 		};
 
 		const getScribeToken = vi.fn(async () => ({ token: "test-token" }));
-		const registerHandlers = () => {};
+		const registerHandlers = () => () => {};
 
 		const { result, rerender } = renderHook(() =>
 			useRealtimeConnection({
@@ -68,6 +68,9 @@ describe("useRealtimeConnection callback identity", () => {
 					scribe,
 					registerHandlers: (handlers) => {
 						onConnect = handlers.onConnect;
+						onConnect();
+
+						return () => {};
 					},
 				}),
 			{ wrapper: StrictMode },

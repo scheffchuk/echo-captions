@@ -12,6 +12,27 @@ export default defineConfig({
 	test: {
 		environment: "edge-runtime",
 		setupFiles: ["./vitest.setup.ts"],
-		include: ["**/*.{test,spec}.{ts,tsx}"],
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: "app",
+					include: ["**/*.{test,spec}.{ts,tsx}"],
+					exclude: [
+						"hooks/use-realtime-connection.native.test.tsx",
+						"node_modules/**",
+					],
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: "native-scribe",
+					environment: "jsdom",
+					include: ["hooks/use-realtime-connection.native.test.tsx"],
+					execArgv: ["--conditions=browser"],
+				},
+			},
+		],
 	},
 });

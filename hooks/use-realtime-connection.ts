@@ -3,12 +3,13 @@ import {
 	CommitStrategy,
 	type ScribeCallbacks,
 	type UseScribeReturn,
-	useScribe,
 } from "@elevenlabs/react";
-import { useAction } from "convex/react";
 import { useCallback, useEffect, useRef } from "react";
-import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import {
+	type BroadcastCommands,
+	useBroadcastAdapters,
+} from "@/hooks/broadcast-adapters";
 import type { CaptureEvent } from "@/hooks/broadcast-capture";
 import {
 	DisconnectTimeout,
@@ -28,18 +29,17 @@ type ConnectionReadyWaiter = {
 	timeoutId: number;
 };
 
-type RealtimeScribe = Pick<
+export type RealtimeScribe = Pick<
 	UseScribeReturn,
 	| "status"
 	| "partialTranscript"
 	| "isConnected"
 	| "connect"
 	| "disconnect"
-	| "getConnection"
 	| "clearTranscripts"
->;
+> & { getConnection: () => { close: () => void } | null };
 
-type RealtimeScribeHandlers = Required<
+export type RealtimeScribeHandlers = Required<
 	Pick<
 		ScribeCallbacks,
 		| "onPartialTranscript"
@@ -61,27 +61,11 @@ type RealtimeScribeHandlers = Required<
 		| "onSessionStarted"
 		| "onDisconnect"
 	>
->;
+> & { onClosing: () => void };
 
-const idleScribeHandlers: RealtimeScribeHandlers = {
-	onPartialTranscript: () => {},
-	onCommittedTranscriptWithTimestamps: () => {},
-	onError: () => {},
-	onAuthError: () => {},
-	onQuotaExceededError: () => {},
-	onCommitThrottledError: () => {},
-	onTranscriberError: () => {},
-	onUnacceptedTermsError: () => {},
-	onRateLimitedError: () => {},
-	onInputError: () => {},
-	onQueueOverflowError: () => {},
-	onResourceExhaustedError: () => {},
-	onSessionTimeLimitExceededError: () => {},
-	onChunkSizeExceededError: () => {},
-	onInsufficientAudioActivityError: () => {},
-	onConnect: () => {},
-	onSessionStarted: () => {},
-	onDisconnect: () => {},
+export type RealtimeCaptureSink = {
+	onCommit?: (event: CaptureEvent) => void;
+	onError?: (message: string) => void;
 };
 
 export function useRealtimeConnection({
@@ -99,7 +83,7 @@ export function useRealtimeConnection({
 	onError?: (message: string) => void;
 	getScribeToken: (args: Record<string, never>) => Promise<{ token: string }>;
 	scribe: RealtimeScribe;
-	registerHandlers: (handlers: RealtimeScribeHandlers) => void;
+	registerHandlers: (handlers: RealtimeScribeHandlers) => () => void;
 }) {
 	const sessionIdRef = useRef(sessionId);
 	const onCommitRef = useRef(onCommit);
@@ -110,6 +94,15 @@ export function useRealtimeConnection({
 	const mountedRef = useRef(true);
 	const failedGenerationRef = useRef<number | null>(null);
 	const connectionReadyWaiterRef = useRef<ConnectionReadyWaiter | null>(null);
+
+	const unsubscribeHandlersRef = useRef<(() => void) | null>(null);
+
+	const releaseHandlers = useCallback(() => {
+		unsubscribeHandlersRef.current?.();
+		unsubscribeHandlersRef.current = null;
+	}, []);
+
+	const disconnectPromiseRef = useRef<Promise<void> | null>(null);
 
 	const disconnectWaiterRef = useRef<{
 		resolve: () => void;
@@ -122,285 +115,166 @@ export function useRealtimeConnection({
 	onCommitRef.current = onCommit;
 	onErrorRef.current = onError;
 
-	const reportRealtimeFailure = useCallback((message: string) => {
-		const generation = activeGenerationRef.current;
-
-		if (generation === null || failedGenerationRef.current === generation)
-			return;
-		failedGenerationRef.current = generation;
-		const failure = new RealtimeTranscriptionError({ message });
-		const waiter = connectionReadyWaiterRef.current;
-
-		if (waiter?.generation === generation) {
-			connectionReadyWaiterRef.current = null;
-			window.clearTimeout(waiter.timeoutId);
-			waiter.reject(failure);
-
-			return;
-		}
-
-		onErrorRef.current?.(failure.message);
-	}, []);
-
-	registerHandlers({
-		onPartialTranscript: () => {},
-		onCommittedTranscriptWithTimestamps: (data) => {
-			const generation = activeGenerationRef.current;
-			const transcript = data.text.trim();
-			const activeSessionId = sessionIdRef.current;
-
-			if (generation === null || !activeSessionId || !transcript) {
+	const createHandlers = (
+		generation: number,
+		sink: RealtimeCaptureSink,
+	): RealtimeScribeHandlers => {
+		const reportRealtimeFailure = (message: string) => {
+			if (
+				generation !== activeGenerationRef.current ||
+				failedGenerationRef.current === generation
+			)
 				return;
-			}
-
-			onCommitRef.current?.({
-				generation,
-				commitId: crypto.randomUUID(),
-				sourceText: transcript,
-				sourceLanguage: fromScribeCode(data.language_code) ?? "",
-				capturedAt: Date.now(),
-			});
-		},
-		onError: () =>
-			reportRealtimeFailure(
-				"Realtime transcription failed. Stop and start recording again.",
-			),
-		onAuthError: () =>
-			reportRealtimeFailure("Realtime transcription authorization failed."),
-		onQuotaExceededError: () =>
-			reportRealtimeFailure("Realtime transcription quota was exceeded."),
-		onCommitThrottledError: () =>
-			reportRealtimeFailure("Realtime transcription is temporarily busy."),
-		onTranscriberError: () =>
-			reportRealtimeFailure(
-				"Realtime transcription failed. Stop and start recording again.",
-			),
-		onUnacceptedTermsError: () =>
-			reportRealtimeFailure("Realtime transcription terms were not accepted."),
-		onRateLimitedError: () =>
-			reportRealtimeFailure("Realtime transcription is rate limited."),
-		onInputError: () =>
-			reportRealtimeFailure("Realtime transcription rejected the audio input."),
-		onQueueOverflowError: () =>
-			reportRealtimeFailure("Realtime transcription audio queue overflowed."),
-		onResourceExhaustedError: () =>
-			reportRealtimeFailure(
-				"Realtime transcription resources are temporarily exhausted.",
-			),
-		onSessionTimeLimitExceededError: () =>
-			reportRealtimeFailure(
-				"Realtime transcription reached its session limit.",
-			),
-		onChunkSizeExceededError: () =>
-			reportRealtimeFailure("Realtime transcription rejected an audio frame."),
-		onInsufficientAudioActivityError: () =>
-			reportRealtimeFailure(
-				"Realtime transcription stopped because no speech was detected.",
-			),
-		onConnect: () => {
-			const waiter = connectionReadyWaiterRef.current;
-
-			if (!waiter || waiter.generation !== activeGenerationRef.current) {
-				return;
-			}
-
-			connectionReadyWaiterRef.current = null;
-			window.clearTimeout(waiter.timeoutId);
-			waiter.resolve();
-		},
-		onSessionStarted: () => {
-			const waiter = connectionReadyWaiterRef.current;
-
-			if (!waiter || waiter.generation !== activeGenerationRef.current) {
-				return;
-			}
-
-			connectionReadyWaiterRef.current = null;
-			window.clearTimeout(waiter.timeoutId);
-			waiter.resolve();
-		},
-		onDisconnect: () => {
-			const generation = activeGenerationRef.current;
-
-			const expectedClose =
-				generation === null || closingGenerationRef.current === generation;
-
-			if (!expectedClose) {
-				reportRealtimeFailure(
-					"Realtime transcription disconnected unexpectedly. Start recording again.",
-				);
-			}
-
-			activeGenerationRef.current = null;
-			closingGenerationRef.current = null;
-			const readyWaiter = connectionReadyWaiterRef.current;
-
-			if (readyWaiter) {
-				connectionReadyWaiterRef.current = null;
-				window.clearTimeout(readyWaiter.timeoutId);
-				readyWaiter.reject(
-					new RealtimeTranscriptionError({
-						message: "Realtime transcription disconnected during activation",
-					}),
-				);
-			}
-
-			const waiter = disconnectWaiterRef.current;
-
-			if (!waiter) return;
-			disconnectWaiterRef.current = null;
-			window.clearTimeout(waiter.timeoutId);
-			waiter.resolve();
-		},
-	});
-
-	const scribeRef = useRef(scribe);
-	scribeRef.current = scribe;
-	useEffect(() => {
-		mountedRef.current = true;
-		closingGenerationRef.current = null;
-
-		return () => {
-			mountedRef.current = false;
-
-			if (activeGenerationRef.current !== null) {
-				closingGenerationRef.current = activeGenerationRef.current;
-			}
-
-			activeGenerationRef.current = null;
-			const waiter = connectionReadyWaiterRef.current;
-
-			if (waiter) {
-				connectionReadyWaiterRef.current = null;
-				window.clearTimeout(waiter.timeoutId);
-				waiter.resolve();
-			}
-
-			scribeRef.current.getConnection()?.close();
-		};
-	}, []);
-
-	const connect = useCallback(async () => {
-		const currentScribe = scribeRef.current;
-
-		if (!deviceId || !sessionIdRef.current) return false;
-
-		if (
-			!mountedRef.current ||
-			closingGenerationRef.current !== null ||
-			activeGenerationRef.current !== null ||
-			currentScribe.getConnection()
-		) {
-			return false;
-		}
-
-		const generation = generationRef.current + 1;
-		generationRef.current = generation;
-		activeGenerationRef.current = generation;
-		failedGenerationRef.current = null;
-
-		const readiness = new Promise<void>((resolve, reject) => {
-			const timeoutId = window.setTimeout(() => {
-				const waiter = connectionReadyWaiterRef.current;
-
-				if (!waiter || waiter.generation !== generation) return;
-				connectionReadyWaiterRef.current = null;
-				reject(
-					new RealtimeTranscriptionError({
-						message: "Timed out waiting for realtime transcription to connect",
-					}),
-				);
-			}, CONNECTION_READY_TIMEOUT_MS);
-
-			connectionReadyWaiterRef.current = {
-				generation,
-				resolve,
-				reject,
-				timeoutId,
-			};
-		});
-
-		try {
-			const { token } = await getScribeToken({});
-
-			if (!mountedRef.current || activeGenerationRef.current !== generation) {
-				const waiter = connectionReadyWaiterRef.current;
-
-				if (waiter?.generation === generation) {
-					connectionReadyWaiterRef.current = null;
-					window.clearTimeout(waiter.timeoutId);
-					waiter.resolve();
-				}
-
-				return false;
-			}
-
-			try {
-				await currentScribe.connect({
-					token,
-					microphone: {
-						echoCancellation: true,
-						noiseSuppression: true,
-						autoGainControl: true,
-						deviceId,
-					},
-				});
-			} catch (cause) {
-				const microphoneError = classifyMicrophoneError(cause);
-				throw new RealtimeTranscriptionError({
-					message: microphoneError.message,
-				});
-			}
-
-			if (!mountedRef.current || activeGenerationRef.current !== generation) {
-				const waiter = connectionReadyWaiterRef.current;
-
-				if (waiter?.generation === generation) {
-					connectionReadyWaiterRef.current = null;
-					window.clearTimeout(waiter.timeoutId);
-					waiter.resolve();
-				}
-
-				if (activeGenerationRef.current === generation) {
-					activeGenerationRef.current = null;
-				}
-
-				closingGenerationRef.current = generation;
-				currentScribe.getConnection()?.close();
-
-				return false;
-			}
-
-			await readiness;
-
-			return generation;
-		} catch (error) {
+			failedGenerationRef.current = generation;
+			const failure = new RealtimeTranscriptionError({ message });
 			const waiter = connectionReadyWaiterRef.current;
 
 			if (waiter?.generation === generation) {
 				connectionReadyWaiterRef.current = null;
 				window.clearTimeout(waiter.timeoutId);
-				waiter.resolve();
+				waiter.reject(failure);
+
+				return;
 			}
 
-			if (activeGenerationRef.current === generation) {
+			sink.onError?.(failure.message);
+		};
+
+		const signalReady = () => {
+			const waiter = connectionReadyWaiterRef.current;
+
+			if (
+				!waiter ||
+				waiter.generation !== generation ||
+				generation !== activeGenerationRef.current
+			) {
+				return;
+			}
+
+			connectionReadyWaiterRef.current = null;
+			window.clearTimeout(waiter.timeoutId);
+			waiter.resolve();
+		};
+
+		return {
+			onClosing: () => {
+				if (activeGenerationRef.current === generation)
+					closingGenerationRef.current = generation;
+			},
+			onPartialTranscript: () => {},
+			onCommittedTranscriptWithTimestamps: (data) => {
+				const transcript = data.text.trim();
+
+				if (generation !== activeGenerationRef.current || !transcript) {
+					return;
+				}
+
+				sink.onCommit?.({
+					generation,
+					commitId: crypto.randomUUID(),
+					sourceText: transcript,
+					sourceLanguage: fromScribeCode(data.language_code) ?? "",
+					capturedAt: Date.now(),
+				});
+			},
+			onError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription failed. Stop and start recording again.",
+				),
+			onAuthError: () =>
+				reportRealtimeFailure("Realtime transcription authorization failed."),
+			onQuotaExceededError: () =>
+				reportRealtimeFailure("Realtime transcription quota was exceeded."),
+			onCommitThrottledError: () =>
+				reportRealtimeFailure("Realtime transcription is temporarily busy."),
+			onTranscriberError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription failed. Stop and start recording again.",
+				),
+			onUnacceptedTermsError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription terms were not accepted.",
+				),
+			onRateLimitedError: () =>
+				reportRealtimeFailure("Realtime transcription is rate limited."),
+			onInputError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription rejected the audio input.",
+				),
+			onQueueOverflowError: () =>
+				reportRealtimeFailure("Realtime transcription audio queue overflowed."),
+			onResourceExhaustedError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription resources are temporarily exhausted.",
+				),
+			onSessionTimeLimitExceededError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription reached its session limit.",
+				),
+			onChunkSizeExceededError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription rejected an audio frame.",
+				),
+			onInsufficientAudioActivityError: () =>
+				reportRealtimeFailure(
+					"Realtime transcription stopped because no speech was detected.",
+				),
+			onConnect: signalReady,
+			onSessionStarted: signalReady,
+			onDisconnect: () => {
+				if (
+					activeGenerationRef.current !== generation &&
+					closingGenerationRef.current !== generation
+				)
+					return;
+
+				const expectedClose = closingGenerationRef.current === generation;
+
+				if (!expectedClose) {
+					reportRealtimeFailure(
+						"Realtime transcription disconnected unexpectedly. Start recording again.",
+					);
+				}
+
+				releaseHandlers();
 				activeGenerationRef.current = null;
-			}
+				closingGenerationRef.current = null;
+				const readyWaiter = connectionReadyWaiterRef.current;
 
-			if (currentScribe.getConnection()) {
-				closingGenerationRef.current = generation;
-				currentScribe.disconnect();
-				currentScribe.clearTranscripts();
-			}
+				if (readyWaiter) {
+					connectionReadyWaiterRef.current = null;
+					window.clearTimeout(readyWaiter.timeoutId);
+					readyWaiter.reject(
+						new RealtimeTranscriptionError({
+							message: "Realtime transcription disconnected during activation",
+						}),
+					);
+				}
 
-			throw error;
-		}
-	}, [deviceId, getScribeToken]);
+				const waiter = disconnectWaiterRef.current;
+
+				if (!waiter) return;
+				disconnectWaiterRef.current = null;
+				window.clearTimeout(waiter.timeoutId);
+				waiter.resolve();
+			},
+		};
+	};
+
+	const scribeRef = useRef(scribe);
+	scribeRef.current = scribe;
+
+	const createHandlersRef = useRef(createHandlers);
+	createHandlersRef.current = createHandlers;
+	const registerHandlersRef = useRef(registerHandlers);
+	registerHandlersRef.current = registerHandlers;
 
 	const disconnect = useCallback((): Promise<void> => {
+		if (disconnectPromiseRef.current) return disconnectPromiseRef.current;
 		const currentScribe = scribeRef.current;
 
 		if (!currentScribe.getConnection()) {
+			releaseHandlers();
 			activeGenerationRef.current = null;
 
 			return Promise.resolve();
@@ -422,6 +296,8 @@ export function useRealtimeConnection({
 
 				if (!waiter || waiter.generation !== generation) return;
 				disconnectWaiterRef.current = null;
+				// Keep the native close barrier: its own CLOSE listener mutates the
+				// hook's connection reference. Reuse is safe only after that event.
 
 				if (activeGenerationRef.current === generation) {
 					activeGenerationRef.current = null;
@@ -443,12 +319,167 @@ export function useRealtimeConnection({
 			};
 		});
 
+		disconnectPromiseRef.current = promise;
 		closingGenerationRef.current = generation;
 		currentScribe.disconnect();
 		currentScribe.clearTranscripts();
 
 		return promise;
-	}, []);
+	}, [releaseHandlers]);
+
+	const connect = useCallback(
+		async (sink?: RealtimeCaptureSink) => {
+			const currentScribe = scribeRef.current;
+
+			const captureSink = sink ?? {
+				onCommit: onCommitRef.current,
+				onError: onErrorRef.current,
+			};
+
+			if (!deviceId || !sessionIdRef.current) return false;
+
+			if (
+				!mountedRef.current ||
+				closingGenerationRef.current !== null ||
+				activeGenerationRef.current !== null ||
+				currentScribe.getConnection()
+			) {
+				return false;
+			}
+
+			disconnectPromiseRef.current = null;
+			const generation = generationRef.current + 1;
+			generationRef.current = generation;
+			activeGenerationRef.current = generation;
+			failedGenerationRef.current = null;
+
+			const readiness = new Promise<void>((resolve, reject) => {
+				const timeoutId = window.setTimeout(() => {
+					const waiter = connectionReadyWaiterRef.current;
+
+					if (!waiter || waiter.generation !== generation) return;
+					connectionReadyWaiterRef.current = null;
+					reject(
+						new RealtimeTranscriptionError({
+							message:
+								"Timed out waiting for realtime transcription to connect",
+						}),
+					);
+				}, CONNECTION_READY_TIMEOUT_MS);
+
+				connectionReadyWaiterRef.current = {
+					generation,
+					resolve,
+					reject,
+					timeoutId,
+				};
+			});
+
+			try {
+				const { token } = await getScribeToken({});
+
+				if (!mountedRef.current || activeGenerationRef.current !== generation) {
+					const waiter = connectionReadyWaiterRef.current;
+
+					if (waiter?.generation === generation) {
+						connectionReadyWaiterRef.current = null;
+						window.clearTimeout(waiter.timeoutId);
+						waiter.resolve();
+					}
+
+					return false;
+				}
+
+				try {
+					currentScribe.clearTranscripts();
+
+					const connected = currentScribe.connect({
+						token,
+						microphone: {
+							echoCancellation: true,
+							noiseSuppression: true,
+							autoGainControl: true,
+							deviceId,
+						},
+					});
+
+					unsubscribeHandlersRef.current = registerHandlersRef.current(
+						createHandlersRef.current(generation, captureSink),
+					);
+					await connected;
+				} catch (cause) {
+					const microphoneError = classifyMicrophoneError(cause);
+					throw new RealtimeTranscriptionError({
+						message: microphoneError.message,
+					});
+				}
+
+				if (!mountedRef.current || activeGenerationRef.current !== generation) {
+					const waiter = connectionReadyWaiterRef.current;
+
+					if (waiter?.generation === generation) {
+						connectionReadyWaiterRef.current = null;
+						window.clearTimeout(waiter.timeoutId);
+						waiter.resolve();
+					}
+
+					if (activeGenerationRef.current === generation) {
+						activeGenerationRef.current = null;
+					}
+
+					closingGenerationRef.current = generation;
+					currentScribe.getConnection()?.close();
+
+					return false;
+				}
+
+				await readiness;
+
+				return generation;
+			} catch (error) {
+				const waiter = connectionReadyWaiterRef.current;
+
+				if (waiter?.generation === generation) {
+					connectionReadyWaiterRef.current = null;
+					window.clearTimeout(waiter.timeoutId);
+					waiter.resolve();
+				}
+
+				try {
+					await disconnect();
+				} catch (cleanup) {
+					if (!(cleanup instanceof DisconnectTimeout)) throw cleanup;
+				}
+
+				throw error;
+			}
+		},
+		[deviceId, getScribeToken, disconnect],
+	);
+
+	useEffect(() => {
+		mountedRef.current = true;
+
+		return () => {
+			mountedRef.current = false;
+			const waiter = connectionReadyWaiterRef.current;
+
+			if (waiter) {
+				connectionReadyWaiterRef.current = null;
+				window.clearTimeout(waiter.timeoutId);
+				waiter.resolve();
+			}
+
+			void disconnect().catch((cause) => {
+				if (!(cause instanceof DisconnectTimeout)) throw cause;
+
+				if (!mountedRef.current) {
+					releaseHandlers();
+					closingGenerationRef.current = null;
+				}
+			});
+		};
+	}, [disconnect, releaseHandlers]);
 
 	return {
 		status: scribe.status,
@@ -464,13 +495,15 @@ export function useLiveRealtimeConnection({
 	deviceId,
 	onCommit,
 	onError,
+	getScribeToken,
 }: {
 	sessionId: Id<"sessions"> | undefined;
 	deviceId: string;
 	onCommit?: (event: CaptureEvent) => void;
 	onError?: (message: string) => void;
+	getScribeToken: BroadcastCommands["getScribeToken"];
 }) {
-	const handlersRef = useRef(idleScribeHandlers);
+	const { useScribe } = useBroadcastAdapters();
 
 	const scribe = useScribe({
 		modelId: "scribe_v2_realtime",
@@ -478,6 +511,7 @@ export function useLiveRealtimeConnection({
 		// SDK rejects <= 0.3 (exclusive); docs claim "between 0.3 and 3.0".
 		vadSilenceThresholdSecs: 0.31,
 		vadThreshold: 0.3,
+		includeTimestamps: true,
 		includeLanguageDetection: true,
 		audioFormat: AudioFormat.PCM_16000,
 		microphone: {
@@ -485,37 +519,7 @@ export function useLiveRealtimeConnection({
 			noiseSuppression: true,
 			autoGainControl: true,
 		},
-		onPartialTranscript: (data) =>
-			handlersRef.current.onPartialTranscript(data),
-		onCommittedTranscriptWithTimestamps: (data) =>
-			handlersRef.current.onCommittedTranscriptWithTimestamps(data),
-		onError: (error) => handlersRef.current.onError(error),
-		onAuthError: (data) => handlersRef.current.onAuthError(data),
-		onQuotaExceededError: (data) =>
-			handlersRef.current.onQuotaExceededError(data),
-		onCommitThrottledError: (data) =>
-			handlersRef.current.onCommitThrottledError(data),
-		onTranscriberError: (data) => handlersRef.current.onTranscriberError(data),
-		onUnacceptedTermsError: (data) =>
-			handlersRef.current.onUnacceptedTermsError(data),
-		onRateLimitedError: (data) => handlersRef.current.onRateLimitedError(data),
-		onInputError: (data) => handlersRef.current.onInputError(data),
-		onQueueOverflowError: (data) =>
-			handlersRef.current.onQueueOverflowError(data),
-		onResourceExhaustedError: (data) =>
-			handlersRef.current.onResourceExhaustedError(data),
-		onSessionTimeLimitExceededError: (data) =>
-			handlersRef.current.onSessionTimeLimitExceededError(data),
-		onChunkSizeExceededError: (data) =>
-			handlersRef.current.onChunkSizeExceededError(data),
-		onInsufficientAudioActivityError: (data) =>
-			handlersRef.current.onInsufficientAudioActivityError(data),
-		onConnect: () => handlersRef.current.onConnect(),
-		onSessionStarted: () => handlersRef.current.onSessionStarted(),
-		onDisconnect: () => handlersRef.current.onDisconnect(),
 	});
-
-	const getScribeToken = useAction(api.scribe.getScribeToken);
 
 	return useRealtimeConnection({
 		sessionId,
@@ -524,8 +528,6 @@ export function useLiveRealtimeConnection({
 		onError,
 		getScribeToken,
 		scribe,
-		registerHandlers: (handlers) => {
-			handlersRef.current = handlers;
-		},
+		registerHandlers: scribe.registerHandlers,
 	});
 }

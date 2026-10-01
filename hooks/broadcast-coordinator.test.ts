@@ -9,6 +9,7 @@ import {
 	type BroadcastCoordinatorAdapters,
 	createBroadcastCoordinator,
 } from "@/hooks/broadcast-coordinator";
+import { DisconnectTimeout } from "@/hooks/broadcast-model";
 import { testId } from "@/test/ids";
 
 function deferred<A>() {
@@ -43,6 +44,7 @@ function makeAdapters(
 		})),
 		heartbeat: vi.fn(async () => undefined),
 		stop: vi.fn(async () => ({ lastCommitOrdinal: 8 })),
+		abandon: vi.fn(async () => ({ lastCommitOrdinal: 8 })),
 		acceptCommit: vi.fn(async () => undefined),
 		...overrides,
 	};
@@ -104,6 +106,105 @@ async function coordinatorWithRejectedCapture(
 }
 
 describe("Broadcast coordinator", () => {
+	it("propagates an unexpected cleanup defect after expected activation rejection", async () => {
+		const defect = new Error("Unexpected disconnect defect");
+
+		const adapters = makeAdapters({
+			start: async () => {
+				throw new ConvexError({ message: "Activation refused" });
+			},
+			disconnect: async () => {
+				throw defect;
+			},
+		});
+
+		const onError = vi.fn();
+		const coordinator = createBroadcastCoordinator({ onError });
+		configureCoordinator(coordinator, "session-cleanup-defect", adapters);
+		await expect(coordinator.run({ kind: "start" })).rejects.toBe(defect);
+		expect(onError).not.toHaveBeenCalled();
+		coordinator.dispose();
+	});
+	it("abandons the confirmed Lost Broadcast and releases local transcription", async () => {
+		const broadcastId = testId("broadcasts", "broadcast-lost");
+		const abandon = vi.fn(async () => ({ lastCommitOrdinal: 7 }));
+		const adapters = makeAdapters({ abandon });
+		const coordinator = createBroadcastCoordinator();
+		coordinator.update({
+			sessionId: testId("sessions", "session-abandon"),
+			recoverableBroadcastId: broadcastId,
+			adapters,
+		});
+
+		await expect(
+			coordinator.run({ kind: "abandon", broadcastId }),
+		).resolves.toMatchObject({
+			kind: "abandon",
+			broadcastId,
+		});
+		expect(abandon).toHaveBeenCalledWith({ broadcastId });
+		expect(adapters.disconnect).toHaveBeenCalledOnce();
+		coordinator.dispose();
+	});
+
+	it("keeps accepted abandonment successful when close acknowledgement times out", async () => {
+		const broadcastId = testId("broadcasts", "broadcast-lost");
+		const closed = deferred<void>();
+		const onError = vi.fn();
+		const coordinator = createBroadcastCoordinator({ onError });
+		coordinator.update({
+			sessionId: testId("sessions", "session-abandon"),
+			recoverableBroadcastId: broadcastId,
+			adapters: makeAdapters({ disconnect: () => closed.promise }),
+		});
+		const abandoning = coordinator.run({ kind: "abandon", broadcastId });
+		await settle();
+		coordinator.offerCapture(capture("closing-caption"));
+		closed.reject(
+			new DisconnectTimeout({ message: "Close acknowledgement timed out" }),
+		);
+		await expect(abandoning).resolves.toMatchObject({ kind: "abandon" });
+		expect(onError).toHaveBeenCalledExactlyOnceWith(
+			"Close acknowledgement timed out",
+		);
+		expect(coordinator.snapshot().rejectedCaptures).toMatchObject([
+			{ commitId: "closing-caption" },
+		]);
+		coordinator.dispose();
+	});
+
+	it("disconnects before a pending abandonment settles and retains text when the server rejects it", async () => {
+		const broadcastId = testId("broadcasts", "broadcast-lost");
+		const response = deferred<{ lastCommitOrdinal: number }>();
+		const onError = vi.fn();
+		const adapters = makeAdapters({ abandon: () => response.promise });
+		const coordinator = createBroadcastCoordinator({ onError });
+		coordinator.update({
+			sessionId: testId("sessions", "session-abandon"),
+			recoverableBroadcastId: broadcastId,
+			adapters,
+		});
+		const abandoning = coordinator.run({ kind: "abandon", broadcastId });
+		await settle();
+		expect(adapters.disconnect).toHaveBeenCalledOnce();
+		coordinator.offerCapture(capture("unaccepted-text"));
+		response.reject(
+			new ConvexError({
+				code: "broadcast_not_lost",
+				message: "Broadcast changed",
+			}),
+		);
+		await expect(abandoning).rejects.toMatchObject({
+			message: "Broadcast changed",
+		});
+		expect(adapters.acceptCommit).not.toHaveBeenCalled();
+		expect(coordinator.snapshot().rejectedCaptures).toMatchObject([
+			{ commitId: "unaccepted-text" },
+		]);
+		expect(onError).toHaveBeenCalledExactlyOnceWith("Broadcast changed");
+		coordinator.dispose();
+	});
+
 	it("accepts captures that arrive while Broadcast activation is pending in order", async () => {
 		const activation = deferred<BroadcastActivation>();
 
@@ -159,7 +260,10 @@ describe("Broadcast coordinator", () => {
 		configureCoordinator(coordinator, "session-generations", adapters);
 
 		await coordinator.run({ kind: "start" });
-		await coordinator.run({ kind: "stop" });
+		await coordinator.run({
+			kind: "stop",
+			broadcastId: testId("broadcasts", "broadcast-1"),
+		});
 		coordinator.offerCapture(capture("commit-stale-before-next-start", 3));
 		await coordinator.run({ kind: "start" });
 		coordinator.offerCapture(capture("commit-stale", 3));
@@ -190,7 +294,12 @@ describe("Broadcast coordinator", () => {
 		await coordinator.run({ kind: "start" });
 
 		coordinator.offerCapture(capture("commit-1"));
-		const stopping = coordinator.run({ kind: "stop" });
+
+		const stopping = coordinator.run({
+			kind: "stop",
+			broadcastId: testId("broadcasts", "broadcast-1"),
+		});
+
 		await settle();
 		coordinator.offerCapture(capture("commit-2"));
 		disconnect.resolve();
@@ -218,7 +327,11 @@ describe("Broadcast coordinator", () => {
 		configureCoordinator(coordinator, "session-stop-boundary", adapters);
 		await coordinator.run({ kind: "start" });
 
-		const stoppingCommand = coordinator.run({ kind: "stop" });
+		const stoppingCommand = coordinator.run({
+			kind: "stop",
+			broadcastId: testId("broadcasts", "broadcast-1"),
+		});
+
 		await vi.waitFor(() => expect(adapters.stop).toHaveBeenCalledOnce());
 		coordinator.offerCapture(capture("commit-after-drain", 3));
 		stopping.resolve({ lastCommitOrdinal: 7 });
@@ -534,7 +647,11 @@ describe("Broadcast coordinator", () => {
 		configureCoordinator(coordinator, "session-pagehide-stop", adapters);
 		await coordinator.run({ kind: "start" });
 
-		const stopping = coordinator.run({ kind: "stop" });
+		const stopping = coordinator.run({
+			kind: "stop",
+			broadcastId: testId("broadcasts", "broadcast-1"),
+		});
+
 		await vi.waitFor(() => expect(adapters.disconnect).toHaveBeenCalledOnce());
 		coordinator.handlePagehide();
 		expect(adapters.disconnect).toHaveBeenCalledOnce();
@@ -618,40 +735,6 @@ describe("Broadcast coordinator", () => {
 		await settle();
 
 		expect(onError).toHaveBeenCalledWith("Heartbeat failed");
-		coordinator.dispose();
-	});
-
-	it("resumes heartbeats and caption acceptance after a development remount", async () => {
-		let heartbeat!: () => void;
-
-		const adapters = makeAdapters();
-
-		const coordinator = createBroadcastCoordinator({
-			timers: {
-				setInterval: vi.fn((callback) => {
-					heartbeat = callback;
-
-					return 1;
-				}),
-				clearInterval: vi.fn(),
-			},
-		});
-
-		configureCoordinator(coordinator, "session-remount", adapters);
-		coordinator.dispose();
-		configureCoordinator(coordinator, "session-remount", adapters);
-		await coordinator.run({ kind: "start" });
-		expect(adapters.heartbeat).toHaveBeenCalledOnce();
-		heartbeat();
-		await settle();
-
-		expect(adapters.heartbeat).toHaveBeenCalledTimes(2);
-		coordinator.offerCapture(capture("commit-after-remount"));
-		await vi.waitFor(() =>
-			expect(adapters.acceptCommit).toHaveBeenCalledWith(
-				expect.objectContaining({ commitId: "commit-after-remount" }),
-			),
-		);
 		coordinator.dispose();
 	});
 

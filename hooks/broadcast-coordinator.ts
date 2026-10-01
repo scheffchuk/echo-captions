@@ -53,6 +53,9 @@ export type BroadcastCoordinatorAdapters = {
 	stop: (args: { broadcastId: Id<"broadcasts"> }) => Promise<{
 		lastCommitOrdinal: number;
 	}>;
+	abandon: (args: { broadcastId: Id<"broadcasts"> }) => Promise<{
+		lastCommitOrdinal: number;
+	}>;
 	acceptCommit: (args: BroadcastCommitInput) => Promise<void>;
 };
 
@@ -67,6 +70,7 @@ export type BroadcastCoordinatorSnapshot = {
 	rejectedCaptures: readonly RejectedCapture[];
 	commandResult: {
 		waiting: boolean;
+		kind: BroadcastCommand["kind"] | null;
 		error: unknown | null;
 	};
 };
@@ -76,6 +80,7 @@ type CoordinatorLifecycle =
 	| { tag: "starting" }
 	| { tag: "active"; activation: BroadcastActivation }
 	| { tag: "stopping"; activation: BroadcastActivation }
+	| { tag: "abandoning" }
 	| { tag: "sealed" };
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
@@ -86,17 +91,12 @@ const defaultTimers: BroadcastCoordinatorTimers = {
 	clearInterval: (id) => globalThis.clearInterval(id),
 };
 
-function ignoreDisconnectTimeout(cause: unknown): void {
-	if (cause instanceof DisconnectTimeout) return;
-	throw cause;
-}
-
 function emptySnapshot(): BroadcastCoordinatorSnapshot {
 	return {
 		activeBroadcastId: null,
 		optimisticCaptures: [],
 		rejectedCaptures: [],
-		commandResult: { waiting: false, error: null },
+		commandResult: { waiting: false, kind: null, error: null },
 	};
 }
 
@@ -112,24 +112,38 @@ export function createBroadcastCoordinator({
 	rejectedCaptureOwner?: RejectedCaptureOwner;
 } = {}) {
 	let adapters: BroadcastCoordinatorAdapters | null = null;
+	let recordingAdapters: BroadcastCoordinatorAdapters | null = null;
 	let sessionId: Id<"sessions"> | undefined;
 	let recoverableBroadcastId: Id<"broadcasts"> | null | undefined;
 	let reportError = onError;
 	let disposed = false;
+	let departing = false;
+	let disconnectResult: Promise<PromiseSettledResult<void>> | null = null;
 	let lifecycle: CoordinatorLifecycle = { tag: "idle" };
 	let realtimeFailed = false;
 	let lastAcceptedOrdinal = 0;
 	let captureBuffer: CaptureBuffer = createCaptureBuffer();
-	let pagehideRequested = false;
 	let heartbeatTimer: number | null = null;
 	let heartbeatFailureReported = false;
-	let commandWaiting = false;
+	let commandKind: BroadcastCommand["kind"] | null = null;
 	let commandError: unknown | null = null;
 	let snapshot = emptySnapshot();
 	let unsubscribeRejectedCaptureOwner = () => {};
 
 	const commandGate = createBroadcastCommandGate();
+	const presentedDisconnectTimeouts = new WeakSet<DisconnectTimeout>();
 	let serializedTail: Promise<void> = Promise.resolve();
+
+	const presentFailure = (
+		failure: ReturnType<typeof toBroadcastCommandError>,
+	) => {
+		if (failure instanceof DisconnectTimeout) {
+			if (presentedDisconnectTimeouts.has(failure)) return;
+			presentedDisconnectTimeouts.add(failure);
+		}
+
+		reportError?.(failure.message);
+	};
 
 	const serialize = <A>(operation: () => Promise<A>): Promise<A> => {
 		const result = serializedTail.then(operation);
@@ -154,11 +168,13 @@ export function createBroadcastCoordinator({
 			optimisticCaptures: snapshot.optimisticCaptures,
 			rejectedCaptures: sessionId ? rejectedCaptureOwner.read(sessionId) : [],
 			commandResult: {
-				waiting: commandWaiting,
+				waiting: commandKind !== null,
+				kind: commandKind,
 				error: commandError,
 			},
 		};
-		onSnapshot?.(snapshot);
+
+		if (!disposed) onSnapshot?.(snapshot);
 	};
 
 	const subscribeRejectedCaptures = () => {
@@ -176,7 +192,7 @@ export function createBroadcastCoordinator({
 		const activeBroadcastId = getActiveBroadcastId();
 
 		const shouldHeartbeat =
-			!disposed && lifecycle.tag === "active" && activeBroadcastId !== null;
+			!departing && lifecycle.tag === "active" && activeBroadcastId !== null;
 
 		if (!shouldHeartbeat && heartbeatTimer !== null) {
 			timers.clearInterval(heartbeatTimer);
@@ -190,7 +206,7 @@ export function createBroadcastCoordinator({
 				const currentBroadcastId =
 					lifecycle.tag === "active" ? lifecycle.activation.broadcastId : null;
 
-				const currentAdapters = adapters;
+				const currentAdapters = recordingAdapters;
 
 				if (!currentBroadcastId || !currentAdapters) return;
 				void currentAdapters.heartbeat(currentBroadcastId).catch((error) => {
@@ -213,16 +229,13 @@ export function createBroadcastCoordinator({
 		adapters: BroadcastCoordinatorAdapters;
 		onError?: (message: string) => void;
 	}) => {
-		const reviving = disposed;
-
-		disposed = false;
+		if (departing) return;
 		sessionId = input.sessionId;
 		recoverableBroadcastId = input.recoverableBroadcastId;
 		adapters = input.adapters;
 
 		if ("onError" in input) reportError = input.onError;
 
-		if (reviving) subscribeRejectedCaptures();
 		updateHeartbeat();
 		emit();
 	};
@@ -299,11 +312,11 @@ export function createBroadcastCoordinator({
 	};
 
 	const drainCaptures = async (): Promise<void> => {
-		while (!disposed && captureBuffer.pending.length > 0) {
+		while (lifecycle.tag !== "abandoning" && captureBuffer.pending.length > 0) {
 			const capture = captureBuffer.pending[0];
 			const activeBroadcastId = getActiveBroadcastId();
 			const activeSessionId = sessionId;
-			const currentAdapters = adapters;
+			const currentAdapters = recordingAdapters;
 
 			if (
 				!capture ||
@@ -371,7 +384,6 @@ export function createBroadcastCoordinator({
 	) => {
 		lifecycle =
 			lastCommitOrdinal === undefined ? { tag: "idle" } : { tag: "sealed" };
-		pagehideRequested = false;
 
 		if (lastCommitOrdinal !== undefined) {
 			lastAcceptedOrdinal = lastCommitOrdinal;
@@ -407,20 +419,45 @@ export function createBroadcastCoordinator({
 		}
 	};
 
-	const startBroadcast = async (): Promise<BroadcastCommandResult> => {
-		const activeSessionId = sessionId;
+	const disconnectOnce = (
+		currentAdapters = recordingAdapters ?? getAdapters(),
+	) => {
+		disconnectResult ??= Promise.allSettled([
+			currentAdapters.disconnect(),
+		]).then(([result]) => result);
+
+		return disconnectResult;
+	};
+
+	const startBroadcast = async (
+		activeSessionId: Id<"sessions"> | undefined,
+		recoverableId: Id<"broadcasts"> | null | undefined,
+		currentAdapters: BroadcastCoordinatorAdapters,
+	): Promise<BroadcastCommandResult> => {
+		if (departing)
+			throw new BroadcastCommandError({
+				message: "Broadcast scope is closing",
+			});
 
 		if (!activeSessionId) {
 			throw new BroadcastCommandError({ message: "Session is not loaded" });
 		}
 
-		const currentAdapters = getAdapters();
+		const reusableGeneration =
+			lifecycle.tag === "active" &&
+			lifecycle.activation.broadcastId === recoverableId &&
+			!realtimeFailed
+				? captureBuffer.generation
+				: null;
+
+		recordingAdapters = currentAdapters;
+		disconnectResult = null;
 		lifecycle = { tag: "starting" };
 		emit();
-		pagehideRequested = false;
 		realtimeFailed = false;
 
-		const generation = await runAdapter(() => currentAdapters.connect());
+		const generation =
+			reusableGeneration ?? (await runAdapter(() => currentAdapters.connect()));
 
 		if (generation === false) {
 			throw new BroadcastCommandError({
@@ -430,13 +467,16 @@ export function createBroadcastCoordinator({
 
 		captureBuffer = { ...captureBuffer, generation };
 
+		if (departing)
+			throw new BroadcastCommandError({
+				message: "Broadcast scope is closing",
+			});
+
 		if (realtimeFailed) {
 			throw new BroadcastCommandError({
 				message: "Realtime transcription failed during activation",
 			});
 		}
-
-		const recoverableId = recoverableBroadcastId;
 
 		const activation = recoverableId
 			? await runAdapter(() => currentAdapters.resume(recoverableId))
@@ -460,36 +500,37 @@ export function createBroadcastCoordinator({
 		}
 
 		if (activationFailed) {
-			await runAdapter(() =>
-				currentAdapters.stop({ broadcastId: activation.broadcastId }),
-			);
-			clearActiveBroadcast();
+			await stopBroadcast(activation.broadcastId);
 			throw new BroadcastCommandError({
 				message: "Realtime transcription failed during activation",
 			});
 		}
 
-		if (pagehideRequested) {
-			pagehideRequested = false;
-			await stopBroadcast();
+		if (departing) {
+			await stopBroadcast(activation.broadcastId);
 		}
 
 		return { kind: "start" as const, broadcastId: activation.broadcastId };
 	};
 
-	const stopBroadcast = async (): Promise<BroadcastCommandResult> => {
+	const stopBroadcast = async (
+		broadcastId: Id<"broadcasts">,
+	): Promise<BroadcastCommandResult> => {
 		const activeActivation = getActiveActivation();
 
-		if (!activeActivation) {
+		if (!activeActivation || activeActivation.broadcastId !== broadcastId) {
 			throw new BroadcastCommandError({ message: "Broadcast is not active" });
 		}
 
 		const activeBroadcastId = activeActivation.broadcastId;
-		const currentAdapters = getAdapters();
+		const currentAdapters = recordingAdapters ?? getAdapters();
 		lifecycle = { tag: "stopping", activation: activeActivation };
 		updateHeartbeat();
 		emit();
-		await runAdapter(() => currentAdapters.disconnect());
+		const cleanup = await disconnectOnce(currentAdapters);
+
+		if (cleanup.status === "rejected")
+			throw toBroadcastCommandError(cleanup.reason);
 		await drainCaptures();
 
 		const stopped = await runAdapter(() =>
@@ -504,29 +545,117 @@ export function createBroadcastCoordinator({
 		return { kind: "stop" as const, broadcastId: activeBroadcastId };
 	};
 
+	const abandonBroadcast = async (
+		broadcastId: Id<"broadcasts">,
+		currentAdapters: BroadcastCoordinatorAdapters,
+	): Promise<BroadcastCommandResult> => {
+		lifecycle = { tag: "abandoning" };
+		updateHeartbeat();
+
+		try {
+			const [server, cleanup] = await Promise.allSettled([
+				runAdapter(() => currentAdapters.abandon({ broadcastId })),
+				disconnectOnce(currentAdapters),
+			]);
+
+			if (cleanup.status === "rejected") throw cleanup.reason;
+
+			if (cleanup.value.status === "rejected") {
+				const failure = toBroadcastCommandError(cleanup.value.reason);
+
+				if (!(failure instanceof DisconnectTimeout)) throw failure;
+				presentFailure(failure);
+			}
+
+			if (server.status === "rejected") throw server.reason;
+		} finally {
+			rejectPendingCaptures("Broadcast tail was explicitly abandoned");
+			clearActiveBroadcast();
+		}
+
+		return { kind: "abandon", broadcastId };
+	};
+
 	const run = async (
 		command: BroadcastCommand,
 	): Promise<BroadcastCommandResult> => {
 		try {
 			return await commandGate.run(async () => {
-				commandWaiting = true;
+				if (departing)
+					throw new BroadcastCommandError({
+						message: "Broadcast scope is closing",
+					});
+				const commandAdapters = getAdapters();
+				const commandSessionId = sessionId;
+				const commandRecoverableId = recoverableBroadcastId;
+				const previousActivation = getActiveActivation();
+
+				if (
+					command.kind === "start" &&
+					lifecycle.tag === "active" &&
+					lifecycle.activation.broadcastId !== commandRecoverableId
+				) {
+					throw new BroadcastCommandError({
+						message: "Broadcast is already active",
+					});
+				}
+
+				if (command.kind === "stop") {
+					const activation = getActiveActivation();
+
+					if (!activation || activation.broadcastId !== command.broadcastId) {
+						throw new BroadcastCommandError({
+							message: "The active Broadcast has changed",
+						});
+					}
+
+					lifecycle = { tag: "stopping", activation };
+					disconnectOnce();
+				} else if (command.kind === "abandon") {
+					if (recoverableBroadcastId !== command.broadcastId) {
+						throw new BroadcastCommandError({
+							message: "The Lost Broadcast has changed",
+						});
+					}
+
+					lifecycle = { tag: "abandoning" };
+					disconnectOnce();
+				}
+
+				updateHeartbeat();
+				commandKind = command.kind;
 				commandError = null;
 				emit();
 
 				try {
-					return await serialize(() =>
-						command.kind === "start" ? startBroadcast() : stopBroadcast(),
-					);
+					return await serialize(() => {
+						switch (command.kind) {
+							case "start":
+								return startBroadcast(
+									commandSessionId,
+									commandRecoverableId,
+									commandAdapters,
+								);
+							case "stop":
+								return stopBroadcast(command.broadcastId);
+							case "abandon":
+								return abandonBroadcast(command.broadcastId, commandAdapters);
+						}
+					});
 				} catch (error) {
 					if (command.kind === "start") {
-						pagehideRequested = false;
-						await getAdapters().disconnect().catch(ignoreDisconnectTimeout);
-						const activeBroadcastId = getActiveBroadcastId();
+						const cleanup = await disconnectOnce();
+						const activation = getActiveActivation() ?? previousActivation;
 
-						if (activeBroadcastId) {
-							await getAdapters()
-								.stop({ broadcastId: activeBroadcastId })
-								.catch(ignorePresentedBroadcastError);
+						if (
+							activation &&
+							(lifecycle.tag === "starting" || lifecycle.tag === "active") &&
+							cleanup.status === "fulfilled"
+						) {
+							lifecycle = { tag: "active", activation };
+							await stopBroadcast(activation.broadcastId).catch((cause) => {
+								presentFailure(toBroadcastCommandError(cause));
+							});
 						}
 
 						clearActiveBroadcast();
@@ -534,12 +663,20 @@ export function createBroadcastCoordinator({
 						rejectPendingCaptures(
 							`Broadcast activation failed: ${failure.message}`,
 						);
+
+						if (
+							cleanup.status === "rejected" &&
+							!(cleanup.reason instanceof DisconnectTimeout)
+						) {
+							throw toBroadcastCommandError(cleanup.reason);
+						}
+
 						throw failure;
 					}
 
 					throw error;
 				} finally {
-					commandWaiting = false;
+					commandKind = null;
 					emit();
 				}
 			});
@@ -547,7 +684,7 @@ export function createBroadcastCoordinator({
 			const failure = toBroadcastCommandError(error);
 			commandError = failure;
 			emit();
-			reportError?.(failure.message);
+			presentFailure(failure);
 			throw failure;
 		}
 	};
@@ -555,48 +692,55 @@ export function createBroadcastCoordinator({
 	const handleRealtimeError = (message: string) => {
 		realtimeFailed = true;
 
+		if (departing) return;
+
 		if (commandGate.isBusy()) return;
 		reportError?.(message);
 
-		if (!getActiveBroadcastId()) return;
-		void run({ kind: "stop" }).catch(ignorePresentedBroadcastError);
+		const broadcastId = getActiveBroadcastId();
+
+		if (!broadcastId) return;
+		void run({ kind: "stop", broadcastId }).catch(
+			ignorePresentedBroadcastError,
+		);
 	};
 
 	const handlePagehide = () => {
-		pagehideRequested = true;
+		if (departing) return;
+		departing = true;
+		updateHeartbeat();
 
-		if (commandGate.isBusy()) return;
+		if (!adapters) return;
 
-		if (!getActiveBroadcastId()) {
-			void serialize(async () => {
-				await adapters?.disconnect().catch(ignoreDisconnectTimeout);
-			});
+		const cleanupAlreadyOwned =
+			disconnectResult !== null || commandGate.isBusy();
 
-			return;
-		}
+		const cleanup = disconnectOnce();
+		void serialize(async () => {
+			if (lifecycle.tag === "active") {
+				await stopBroadcast(lifecycle.activation.broadcastId);
+			} else {
+				const result = await cleanup;
 
-		void run({ kind: "stop" }).catch(ignorePresentedBroadcastError);
-	};
-
-	const abandon = () => {
-		rejectPendingCaptures("Broadcast tail was explicitly abandoned");
-		void adapters?.disconnect().catch((error) => {
-			if (error instanceof DisconnectTimeout) {
-				reportError?.(error.message);
-
-				return;
+				if (!cleanupAlreadyOwned && result.status === "rejected")
+					throw toBroadcastCommandError(result.reason);
 			}
 
-			throw error;
+			rejectPendingCaptures("Broadcast scope was left before acceptance");
+		}).catch((cause) => {
+			rejectPendingCaptures("Broadcast scope was left before acceptance");
+			presentFailure(toBroadcastCommandError(cause));
 		});
-		clearActiveBroadcast();
 	};
 
 	const offerCapture = (event: CaptureEvent) => {
-		if (disposed) return;
 		const capture = appendCaptureEvent(event);
 
-		if (capture && getActiveBroadcastId()) {
+		if (capture && (disposed || lifecycle.tag === "abandoning")) {
+			markRejected([capture], "Broadcast scope closed before acceptance");
+		}
+
+		if (capture && !departing && getActiveBroadcastId()) {
 			void serialize(drainCaptures);
 		}
 	};
@@ -604,15 +748,13 @@ export function createBroadcastCoordinator({
 	const dispose = () => {
 		if (disposed) return;
 		disposed = true;
-
-		if (heartbeatTimer !== null) {
-			timers.clearInterval(heartbeatTimer);
-			heartbeatTimer = null;
-		}
-
-		rejectPendingCaptures("Broadcast scope was unmounted before acceptance");
+		markRejected(
+			captureBuffer.pending,
+			"Broadcast scope was unmounted before acceptance",
+		);
 		unsubscribeRejectedCaptureOwner();
-		void adapters?.disconnect().catch(ignoreDisconnectTimeout);
+		handlePagehide();
+		emit();
 	};
 
 	return {
@@ -621,7 +763,6 @@ export function createBroadcastCoordinator({
 		offerCapture,
 		handleRealtimeError,
 		handlePagehide,
-		abandon,
 		dispose,
 		clearRejectedCaptures,
 		snapshot: () => snapshot,
