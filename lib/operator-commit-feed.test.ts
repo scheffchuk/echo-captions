@@ -12,6 +12,8 @@ function commit(
 ): OperatorCommitProjection {
 	return {
 		commitId,
+		broadcastSequence: 1,
+		commitOrdinal: 1,
 		sourceText,
 		sourceLanguage: "en",
 		translations: {},

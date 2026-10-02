@@ -686,33 +686,20 @@ function StepLanguages({ form }: { form: CreateEventFormApi }) {
 													))}
 												</div>
 											) : null}
-											<div className="flex flex-wrap items-center gap-2">
-												<AddLanguageButton
-													disabledCodes={[...spoken, ...extra]}
-													onAdd={addExtra}
-												/>
-												{extra.map((code) => (
-													<Badge
-														key={code}
-														variant="secondary"
-														className="h-7 gap-1.5 rounded-lg px-2.5 text-xs"
-													>
-														{getCommonLanguageName(code)}
-														<button
-															type="button"
-															className="inline-flex size-4 items-center justify-center hover:text-destructive"
-															aria-label={`Remove ${getCommonLanguageName(code)}`}
-															onClick={() =>
-																extraField.handleChange(
-																	extra.filter((c) => c !== code),
-																)
-															}
-														>
-															<X className="size-3.5" />
-														</button>
-													</Badge>
-												))}
-											</div>
+											<LanguageChips
+												selected={extra}
+												onRemove={(code) =>
+													extraField.handleChange(
+														extra.filter((c) => c !== code),
+													)
+												}
+												addButton={
+													<AddLanguageButton
+														disabledCodes={[...spoken, ...extra]}
+														onAdd={addExtra}
+													/>
+												}
+											/>
 										</div>
 									)}
 								</div>

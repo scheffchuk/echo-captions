@@ -4,38 +4,22 @@ import {
 	useScribe,
 } from "@elevenlabs/react";
 import { useAction, useMutation } from "convex/react";
-import type { FunctionReturnType } from "convex/server";
 import { createContext, type ReactNode, useContext, useRef } from "react";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
-import type {
-	BroadcastActivation,
-	BroadcastCommitInput,
-} from "@/hooks/broadcast-coordinator";
 import type {
 	RealtimeScribe,
 	RealtimeScribeHandlers,
 } from "@/hooks/use-realtime-connection";
 
+type NativeCommands = ReturnType<typeof useNativeCommands>;
+
 export type BroadcastCommands = {
-	start: (args: { sessionId: Id<"sessions"> }) => Promise<BroadcastActivation>;
-	resume: (args: {
-		broadcastId: Id<"broadcasts">;
-	}) => Promise<BroadcastActivation>;
-	stop: (args: {
-		broadcastId: Id<"broadcasts">;
-	}) => Promise<BroadcastActivation>;
-	abandon: (args: {
-		broadcastId: Id<"broadcasts">;
-	}) => Promise<BroadcastActivation>;
-	heartbeat: (args: { broadcastId: Id<"broadcasts"> }) => Promise<null>;
-	acceptCommit: (
-		args: BroadcastCommitInput,
-	) => Promise<FunctionReturnType<typeof api.captions.acceptCommit>>;
-	getScribeToken: (args: Record<string, never>) => Promise<{ token: string }>;
+	[Command in keyof NativeCommands]: (
+		...args: Parameters<NativeCommands[Command]>
+	) => ReturnType<NativeCommands[Command]>;
 };
 
-function useNativeCommands(): BroadcastCommands {
+function useNativeCommands() {
 	const start = useMutation(api.broadcasts.start);
 	const resume = useMutation(api.broadcasts.resume);
 	const stop = useMutation(api.broadcasts.stop);

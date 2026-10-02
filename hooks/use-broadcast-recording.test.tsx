@@ -55,7 +55,12 @@ function makeRecordingAdapters() {
 		for (const listener of listeners) listener();
 	};
 
-	const activation = { broadcastId, sequence: 1, lastCommitOrdinal: 0 };
+	const activation: Awaited<ReturnType<BroadcastCommands["start"]>> = {
+		broadcastId,
+		sequence: 1,
+		lastCommitOrdinal: 0,
+		status: "active",
+	};
 
 	const receipt: Awaited<ReturnType<BroadcastCommands["acceptCommit"]>> = {
 		acceptedCommitId: testId("acceptedCommits", "accepted-recording-caption"),
@@ -69,10 +74,21 @@ function makeRecordingAdapters() {
 	};
 
 	const commands = {
-		start: vi.fn(async () => activation),
-		resume: vi.fn(async () => activation),
-		stop: vi.fn(async () => ({ ...activation, status: "sealed" as const })),
-		abandon: vi.fn<BroadcastCommands["abandon"]>(async () => activation),
+		start: vi.fn<BroadcastCommands["start"]>(async () => activation),
+		resume: vi.fn<BroadcastCommands["resume"]>(async () => ({
+			...activation,
+			finalCommitOrdinal: undefined,
+		})),
+		stop: vi.fn<BroadcastCommands["stop"]>(async () => ({
+			...activation,
+			status: "sealed",
+			finalCommitOrdinal: 0,
+		})),
+		abandon: vi.fn<BroadcastCommands["abandon"]>(async () => ({
+			...activation,
+			status: "sealed",
+			finalCommitOrdinal: 0,
+		})),
 		heartbeat: vi.fn(async () => null),
 		acceptCommit: vi.fn<BroadcastCommands["acceptCommit"]>(async () => receipt),
 		getScribeToken: vi.fn(async () => ({ token: "test-token" })),
@@ -224,7 +240,13 @@ describe("mounted Broadcast recording", () => {
 		await act(async () => {});
 		act(() => fixture.error());
 		await act(async () => {
-			resumed.resolve({ broadcastId, sequence: 1, lastCommitOrdinal: 0 });
+			resumed.resolve({
+				broadcastId,
+				sequence: 1,
+				lastCommitOrdinal: 0,
+				status: "active",
+				finalCommitOrdinal: undefined,
+			});
 			await expect(outcome).resolves.toBeInstanceOf(BroadcastCommandError);
 		});
 		unmount();
@@ -541,7 +563,12 @@ describe("mounted Broadcast recording", () => {
 		unmount();
 		expect(fixture.mediaReleased()).toBe(true);
 		await act(async () => {
-			activated.resolve({ broadcastId, sequence: 1, lastCommitOrdinal: 0 });
+			activated.resolve({
+				broadcastId,
+				sequence: 1,
+				lastCommitOrdinal: 0,
+				status: "active",
+			});
 			await starting;
 		});
 		expect(fixture.commands.stop).toHaveBeenCalledExactlyOnceWith({
@@ -797,7 +824,12 @@ describe("mounted Broadcast recording", () => {
 		unmount();
 		expect(fixture.mediaReleased()).toBe(true);
 		await act(async () => {
-			activated.resolve({ broadcastId, sequence: 1, lastCommitOrdinal: 0 });
+			activated.resolve({
+				broadcastId,
+				sequence: 1,
+				lastCommitOrdinal: 0,
+				status: "active",
+			});
 			await vi.advanceTimersByTimeAsync(2_000);
 			await outcome;
 		});

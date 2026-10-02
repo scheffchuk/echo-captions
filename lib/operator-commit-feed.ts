@@ -3,8 +3,8 @@ import type { CaptionSegment } from "@/lib/segment-display";
 
 export type OperatorCommitProjection = {
 	commitId: string;
-	broadcastSequence?: number;
-	commitOrdinal?: number;
+	broadcastSequence: number;
+	commitOrdinal: number;
 	sourceText: string;
 	sourceLanguage: string;
 	translations: Record<string, string>;
@@ -42,25 +42,11 @@ export function mergeOperatorCommitProjections(
 		...optimistic.filter((commit) => !committedIds.has(commit.commitId)),
 	];
 
-	if (
-		merged.every(
-			(commit) =>
-				commit.broadcastSequence !== undefined &&
-				commit.commitOrdinal !== undefined,
-		)
-	) {
-		return merged
-			.slice()
-			.sort(
-				(left, right) =>
-					(left.broadcastSequence ?? Number.MAX_SAFE_INTEGER) -
-						(right.broadcastSequence ?? Number.MAX_SAFE_INTEGER) ||
-					(left.commitOrdinal ?? Number.MAX_SAFE_INTEGER) -
-						(right.commitOrdinal ?? Number.MAX_SAFE_INTEGER),
-			);
-	}
-
-	return merged;
+	return merged.sort(
+		(left, right) =>
+			left.broadcastSequence - right.broadcastSequence ||
+			left.commitOrdinal - right.commitOrdinal,
+	);
 }
 
 function mapCommitStatus(

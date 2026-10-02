@@ -1,3 +1,5 @@
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
+import type { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import {
 	activateCaptureBuffer,
@@ -29,20 +31,14 @@ export type BroadcastLifecycleStatus =
 	| "stopping"
 	| "sealed";
 
-export type BroadcastActivation = {
-	broadcastId: Id<"broadcasts">;
-	sequence: number;
-	lastCommitOrdinal: number;
-};
+export type BroadcastActivation = Pick<
+	FunctionReturnType<typeof api.broadcasts.start>,
+	"broadcastId" | "sequence" | "lastCommitOrdinal"
+>;
 
-export type BroadcastCommitInput = {
-	sessionId: Id<"sessions">;
-	broadcastId: Id<"broadcasts">;
-	commitOrdinal: number;
-	commitId: string;
-	sourceText: string;
-	sourceLanguage: string;
-};
+export type BroadcastCommitInput = FunctionArgs<
+	typeof api.captions.acceptCommit
+>;
 
 export type BroadcastCoordinatorAdapters = {
 	connect: () => Promise<number | false>;
@@ -240,7 +236,10 @@ export function createBroadcastCoordinator({
 		emit();
 	};
 
-	const setOptimisticCapture = (capture: CapturedCommit) => {
+	const setOptimisticCapture = (
+		capture: CapturedCommit,
+		activation: BroadcastActivation,
+	) => {
 		if (
 			snapshot.optimisticCaptures.some(
 				(item) => item.commitId === capture.commitId,
@@ -255,7 +254,7 @@ export function createBroadcastCoordinator({
 				...snapshot.optimisticCaptures,
 				{
 					commitId: capture.commitId,
-					broadcastSequence: getActiveActivation()?.sequence,
+					broadcastSequence: activation.sequence,
 					commitOrdinal: capture.commitOrdinal,
 					sourceText: capture.sourceText,
 					sourceLanguage: capture.sourceLanguage,
@@ -314,25 +313,20 @@ export function createBroadcastCoordinator({
 	const drainCaptures = async (): Promise<void> => {
 		while (lifecycle.tag !== "abandoning" && captureBuffer.pending.length > 0) {
 			const capture = captureBuffer.pending[0];
-			const activeBroadcastId = getActiveBroadcastId();
+			const activation = getActiveActivation();
 			const activeSessionId = sessionId;
 			const currentAdapters = recordingAdapters;
 
-			if (
-				!capture ||
-				!activeBroadcastId ||
-				!activeSessionId ||
-				!currentAdapters
-			) {
+			if (!capture || !activation || !activeSessionId || !currentAdapters) {
 				return;
 			}
 
-			setOptimisticCapture(capture);
+			setOptimisticCapture(capture, activation);
 
 			try {
 				await currentAdapters.acceptCommit({
 					sessionId: activeSessionId,
-					broadcastId: activeBroadcastId,
+					broadcastId: activation.broadcastId,
 					commitOrdinal: capture.commitOrdinal,
 					commitId: capture.commitId,
 					sourceText: capture.sourceText,
