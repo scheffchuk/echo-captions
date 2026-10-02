@@ -38,12 +38,6 @@ export const translationMappingRevisionTableValidator = v.object({
 	mappings: v.array(translationMappingValidator),
 });
 
-export const translationMappingRevisionDocValidator =
-	translationMappingRevisionTableValidator.extend({
-		_id: v.id("translationMappingRevisions"),
-		_creationTime: v.number(),
-	});
-
 export const sessionTableValidator = v.object({
 	title: v.string(),
 	slug: v.string(),
@@ -83,11 +77,6 @@ export const acceptedCommitTableValidator = v.object({
 	error: v.optional(v.string()),
 });
 
-export const acceptedCommitDocValidator = acceptedCommitTableValidator.extend({
-	_id: v.id("acceptedCommits"),
-	_creationTime: v.number(),
-});
-
 export const acceptedCommitTargetTableValidator = v.object({
 	acceptedCommitId: v.id("acceptedCommits"),
 	sessionId: v.id("sessions"),
@@ -100,12 +89,6 @@ export const acceptedCommitTargetTableValidator = v.object({
 	priority: v.optional(v.union(v.literal("live"), v.literal("retry"))),
 	providerAttemptCount: v.optional(v.number()),
 });
-
-export const acceptedCommitTargetDocValidator =
-	acceptedCommitTargetTableValidator.extend({
-		_id: v.id("acceptedCommitTargets"),
-		_creationTime: v.number(),
-	});
 
 export default defineSchema({
 	...authTables,
@@ -123,11 +106,7 @@ export default defineSchema({
 		.index("by_session_id_and_commit_id", ["sessionId", "commitId"])
 		.index("by_commit_id", ["commitId"])
 		.index("by_session_id_and_sequence", ["sessionId", "sequence"])
-		.index("by_session_id_and_status", ["sessionId", "status"])
-		.index("by_broadcast_id_and_commit_ordinal", [
-			"broadcastId",
-			"commitOrdinal",
-		]),
+		.index("by_session_id_and_status", ["sessionId", "status"]),
 	acceptedCommitTargets: defineTable(acceptedCommitTargetTableValidator.fields)
 		.index("by_session_id", ["sessionId"])
 		.index("by_accepted_commit_id_and_target_language", [

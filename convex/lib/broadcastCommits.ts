@@ -1,8 +1,8 @@
 import type { RunResult } from "@convex-dev/workpool";
-import { ConvexError } from "convex/values";
+import { ConvexError, type Infer, v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { getCurrentOperatorId } from "./auth";
+import type { MutationCtx } from "../_generated/server";
+import { requireCurrentOperatorId } from "./auth";
 import {
 	admitBroadcastCommit,
 	assertValidBroadcastState,
@@ -10,6 +10,7 @@ import {
 } from "./broadcasts";
 import { enqueueCaptionTargets } from "./captionWorkpool";
 import { computeTranslationTargets, resolveSourceLanguage } from "./languages";
+import { getAvailableOwnedSession } from "./sessions";
 
 const MAX_COMMIT_ID_CHARS = 128;
 
@@ -58,29 +59,6 @@ function validateCommitInput(args: {
 	return { commitId, sourceText };
 }
 
-export async function getOperatorSession(
-	ctx: QueryCtx | MutationCtx,
-	sessionId: Id<"sessions">,
-) {
-	const operatorId = await getCurrentOperatorId(ctx);
-
-	if (!operatorId) {
-		throwCaptionError("not_authenticated", "Not authenticated");
-	}
-
-	const session = await ctx.db.get("sessions", sessionId);
-
-	if (!session) {
-		throwCaptionError("session_not_found", "Session not found");
-	}
-
-	if (session.ownerId !== operatorId) {
-		throwCaptionError("unauthorized", "Unauthorized");
-	}
-
-	return session;
-}
-
 function toReceipt(commit: AcceptedCommit) {
 	return {
 		acceptedCommitId: commit._id,
@@ -94,13 +72,6 @@ function toReceipt(commit: AcceptedCommit) {
 	};
 }
 
-async function getAcceptedCommitById(
-	ctx: QueryCtx | MutationCtx,
-	acceptedCommitId: Id<"acceptedCommits">,
-) {
-	return await ctx.db.get("acceptedCommits", acceptedCommitId);
-}
-
 export async function acceptBroadcastCommit(
 	ctx: MutationCtx,
 	args: {
@@ -112,11 +83,13 @@ export async function acceptBroadcastCommit(
 		sourceLanguage: string;
 	},
 ) {
-	const session = await getOperatorSession(ctx, args.sessionId);
+	const operatorId = await requireCurrentOperatorId(ctx);
 
-	if (session.deletionRequestedAt !== undefined) {
-		throwCaptionError("session_deleting", "Session is being deleted");
-	}
+	const session = await getAvailableOwnedSession(
+		ctx,
+		args.sessionId,
+		operatorId,
+	);
 
 	const { commitId, sourceText } = validateCommitInput(args);
 
@@ -219,14 +192,14 @@ export async function acceptBroadcastCommit(
 		lastActivityAt,
 	});
 
-	const accepted = await getAcceptedCommitById(ctx, acceptedCommitId);
+	const accepted = await ctx.db.get("acceptedCommits", acceptedCommitId);
 
 	if (!accepted)
 		throw new Error("Accepted commit disappeared during acceptance");
 
 	if (targetIds.length === 0) {
-		await completeAcceptedCommit(ctx, { acceptedCommitId, completion: null });
-		const finished = await getAcceptedCommitById(ctx, acceptedCommitId);
+		await publishAcceptedCommit(ctx, accepted, []);
+		const finished = await ctx.db.get("acceptedCommits", acceptedCommitId);
 
 		if (!finished)
 			throw new Error("Accepted commit disappeared after publication");
@@ -243,17 +216,19 @@ export async function retryBroadcastCommit(
 	ctx: MutationCtx,
 	args: { acceptedCommitId: Id<"acceptedCommits"> },
 ) {
-	const accepted = await getAcceptedCommitById(ctx, args.acceptedCommitId);
+	const accepted = await ctx.db.get("acceptedCommits", args.acceptedCommitId);
 
 	if (!accepted) {
 		throwCaptionError("commit_not_found", "Accepted commit not found");
 	}
 
-	const session = await getOperatorSession(ctx, accepted.sessionId);
+	const operatorId = await requireCurrentOperatorId(ctx);
 
-	if (session.deletionRequestedAt !== undefined) {
-		throwCaptionError("session_deleting", "Session is being deleted");
-	}
+	const session = await getAvailableOwnedSession(
+		ctx,
+		accepted.sessionId,
+		operatorId,
+	);
 
 	if (accepted.status === "pending") return toReceipt(accepted);
 
@@ -312,26 +287,29 @@ export async function retryBroadcastCommit(
 		failedTargets.map((target) => target._id),
 	);
 
-	const retried = await getAcceptedCommitById(ctx, accepted._id);
+	const retried = await ctx.db.get("acceptedCommits", accepted._id);
 
 	if (!retried) throw new Error("Accepted commit disappeared during retry");
 
 	return toReceipt(retried);
 }
 
-export type TargetCompletion =
-	| {
-			kind: "translated";
-			targetId: Id<"acceptedCommitTargets">;
-			targetLanguage: string;
-			translation: string;
-	  }
-	| {
-			kind: "failed";
-			targetId: Id<"acceptedCommitTargets">;
-			targetLanguage: string;
-			error: string;
-	  };
+export const targetTranslationResultValidator = v.union(
+	v.object({
+		kind: v.literal("translated"),
+		targetId: v.id("acceptedCommitTargets"),
+		targetLanguage: v.string(),
+		translation: v.string(),
+	}),
+	v.object({
+		kind: v.literal("failed"),
+		targetId: v.id("acceptedCommitTargets"),
+		targetLanguage: v.string(),
+		error: v.string(),
+	}),
+);
+
+export type TargetCompletion = Infer<typeof targetTranslationResultValidator>;
 
 function assertTargetCompletion(
 	target: Pick<Doc<"acceptedCommitTargets">, "_id" | "targetLanguage">,
@@ -354,17 +332,6 @@ function assertTargetCompletion(
 }
 
 type AcceptedCommitTarget = Doc<"acceptedCommitTargets">;
-
-type CompleteAcceptedCommitInput =
-	| {
-			acceptedCommitId: Id<"acceptedCommits">;
-			workId: string;
-			completion: TargetCompletion;
-	  }
-	| {
-			acceptedCommitId: Id<"acceptedCommits">;
-			completion: null;
-	  };
 
 async function createFinishedSegment(
 	ctx: MutationCtx,
@@ -478,46 +445,49 @@ async function publishAcceptedCommit(
 	}
 }
 
-async function completeAcceptedCommit(
+export async function completeBroadcastCommit(
 	ctx: MutationCtx,
-	input: CompleteAcceptedCommitInput,
+	event: {
+		workId: string;
+		context: { acceptedCommitId: Id<"acceptedCommits"> };
+		result: RunResult<TargetCompletion>;
+	},
 ) {
-	if (input.completion === null) {
-		const commit = await ctx.db.get("acceptedCommits", input.acceptedCommitId);
-
-		if (!commit) return;
-
-		if (commit.status !== "pending") return;
-
-		if (commit.targetCount !== 0) {
-			throw new Error("Accepted commit has unexpected zero-target completion");
-		}
-
-		await publishAcceptedCommit(ctx, commit, []);
-
-		return;
-	}
-
 	const target = await ctx.db
 		.query("acceptedCommitTargets")
-		.withIndex("by_work_id", (q) => q.eq("workId", input.workId))
+		.withIndex("by_work_id", (q) => q.eq("workId", event.workId))
 		.unique();
 
-	if (!target) return;
+	if (!target) return null;
 
-	if (target.acceptedCommitId !== input.acceptedCommitId) {
+	if (target.acceptedCommitId !== event.context.acceptedCommitId) {
 		throw new Error("Translation completion commit identity mismatch");
 	}
 
-	const commit = await ctx.db.get("acceptedCommits", input.acceptedCommitId);
+	const commit = await ctx.db.get(
+		"acceptedCommits",
+		event.context.acceptedCommitId,
+	);
 
 	if (!commit) {
 		throw new Error("Translation target references a missing Accepted commit");
 	}
 
-	if (commit.status !== "pending" || target.status !== "pending") return;
+	if (commit.status !== "pending" || target.status !== "pending") return null;
 
-	const { completion } = input;
+	const completion: TargetCompletion =
+		event.result.kind === "success"
+			? event.result.returnValue
+			: {
+					kind: "failed",
+					targetId: target._id,
+					targetLanguage: target.targetLanguage,
+					error:
+						event.result.kind === "failed"
+							? "Translation failed unexpectedly"
+							: "Translation canceled",
+				};
+
 	assertTargetCompletion(target, completion);
 
 	await ctx.db.patch(target._id, {
@@ -550,60 +520,10 @@ async function completeAcceptedCommit(
 	if (completedTargetCount + failedTargetCount < commit.targetCount) {
 		await ctx.db.patch(commit._id, { completedTargetCount, failedTargetCount });
 
-		return;
+		return null;
 	}
 
 	await publishAcceptedCommit(ctx, commit, targets);
-}
-
-async function mapTargetCompletion(
-	ctx: MutationCtx,
-	args: {
-		workId: string;
-		context: { acceptedCommitId: Id<"acceptedCommits"> };
-		result: RunResult<TargetCompletion>;
-	},
-): Promise<TargetCompletion | null> {
-	if (args.result.kind === "success") return args.result.returnValue;
-
-	const target = await ctx.db
-		.query("acceptedCommitTargets")
-		.withIndex("by_work_id", (q) => q.eq("workId", args.workId))
-		.unique();
-
-	if (!target) return null;
-
-	if (target.acceptedCommitId !== args.context.acceptedCommitId) {
-		throw new Error("Translation completion commit identity mismatch");
-	}
-
-	return {
-		kind: "failed",
-		targetId: target._id,
-		targetLanguage: target.targetLanguage,
-		error:
-			args.result.kind === "failed"
-				? "Translation failed unexpectedly"
-				: "Translation canceled",
-	};
-}
-
-export async function completeBroadcastCommit(
-	ctx: MutationCtx,
-	event: {
-		workId: string;
-		context: { acceptedCommitId: Id<"acceptedCommits"> };
-		result: RunResult<TargetCompletion>;
-	},
-) {
-	const completion = await mapTargetCompletion(ctx, event);
-
-	if (completion)
-		await completeAcceptedCommit(ctx, {
-			workId: event.workId,
-			acceptedCommitId: event.context.acceptedCommitId,
-			completion,
-		});
 
 	return null;
 }

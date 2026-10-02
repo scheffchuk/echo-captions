@@ -1,49 +1,13 @@
 import type { FunctionReference } from "convex/server";
+import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { requireCurrentOperatorId, Unauthorized } from "./auth";
-import {
-	getAvailableOwnedSession,
-	SessionBusy,
-	SessionNotFound,
-} from "./sessions";
+import { requireCurrentOperatorId } from "./auth";
+import { getAvailableOwnedSession, getOwnedSession } from "./sessions";
 
 export type BroadcastStatus = "active" | "lost" | "stopping" | "sealed";
-
-export class BroadcastNotFound extends Schema.TaggedError<BroadcastNotFound>()(
-	"BroadcastNotFound",
-	{ message: Schema.String },
-) {}
-
-export class BroadcastNotActive extends Schema.TaggedError<BroadcastNotActive>()(
-	"BroadcastNotActive",
-	{ message: Schema.String },
-) {}
-
-export class BroadcastNotLost extends Schema.TaggedError<BroadcastNotLost>()(
-	"BroadcastNotLost",
-	{ message: Schema.String },
-) {}
-
-export class BroadcastConflict extends Schema.TaggedError<BroadcastConflict>()(
-	"BroadcastConflict",
-	{ message: Schema.String },
-) {}
-
-export class InvalidCommitOrdinal extends Schema.TaggedError<InvalidCommitOrdinal>()(
-	"InvalidCommitOrdinal",
-	{ message: Schema.String },
-) {}
-
-export const broadcastErrorCodes = {
-	BroadcastConflict: "broadcast_conflict",
-	BroadcastNotActive: "broadcast_not_active",
-	BroadcastNotLost: "broadcast_not_lost",
-	BroadcastNotFound: "broadcast_not_found",
-	InvalidCommitOrdinal: "invalid_commit_ordinal",
-} as const;
 
 export const BROADCAST_HEARTBEAT_TIMEOUT_MS = 20_000;
 
@@ -289,18 +253,13 @@ async function getOwnedBroadcast(
 	const broadcast = await ctx.db.get("broadcasts", broadcastId);
 
 	if (!broadcast) {
-		throw new BroadcastNotFound({ message: "Broadcast not found" });
+		throw new ConvexError({
+			code: "broadcast_not_found",
+			message: "Broadcast not found",
+		});
 	}
 
-	const session = await ctx.db.get("sessions", broadcast.sessionId);
-
-	if (!session) {
-		throw new SessionNotFound({ message: "Session not found" });
-	}
-
-	if (session.ownerId !== ownerId) {
-		throw new Unauthorized({ message: "Unauthorized" });
-	}
+	await getOwnedSession(ctx, broadcast.sessionId, ownerId);
 
 	return assertValidBroadcastState(broadcast);
 }
@@ -378,14 +337,21 @@ export async function admitBroadcastCommit(
 	const broadcast = await ctx.db.get("broadcasts", args.broadcastId);
 
 	if (!broadcast || broadcast.sessionId !== args.sessionId)
-		throw new BroadcastNotFound({ message: "Broadcast not found" });
+		throw new ConvexError({
+			code: "broadcast_not_found",
+			message: "Broadcast not found",
+		});
 	assertValidBroadcastState(broadcast);
 
 	if (broadcast.status !== "active")
-		throw new BroadcastNotActive({ message: "Broadcast is no longer active" });
+		throw new ConvexError({
+			code: "broadcast_not_active",
+			message: "Broadcast is no longer active",
+		});
 
 	if (args.commitOrdinal !== broadcast.lastCommitOrdinal + 1)
-		throw new BroadcastConflict({
+		throw new ConvexError({
+			code: "broadcast_conflict",
 			message: "Commit ordinal is not the next position",
 		});
 	await ctx.db.patch(broadcast._id, {
@@ -424,18 +390,21 @@ function transitionError(
 	notLostMessage = "Only a Lost Broadcast can be resumed or abandoned",
 ) {
 	if (reason === "conflict") {
-		return new BroadcastConflict({
+		return new ConvexError({
+			code: "broadcast_conflict",
 			message: "Final commit ordinal conflicts with the Broadcast state",
 		});
 	}
 
 	if (reason === "not_active") {
-		return new BroadcastNotActive({
+		return new ConvexError({
+			code: "broadcast_not_active",
 			message: "Resume or abandon the Lost Broadcast before stopping it",
 		});
 	}
 
-	return new BroadcastNotLost({
+	return new ConvexError({
+		code: "broadcast_not_lost",
 		message: notLostMessage,
 	});
 }
@@ -450,7 +419,8 @@ export async function startBroadcast(
 	const unresolved = await readUnresolvedBroadcast(ctx, sessionId);
 
 	if (unresolved) {
-		throw new SessionBusy({
+		throw new ConvexError({
+			code: "session_busy",
 			message: "The Session already has an unresolved Broadcast",
 		});
 	}
@@ -716,7 +686,8 @@ export function validateFinalCommitOrdinal(value: number) {
 	try {
 		return Schema.decodeUnknownSync(Schema.Natural)(value);
 	} catch {
-		throw new InvalidCommitOrdinal({
+		throw new ConvexError({
+			code: "invalid_commit_ordinal",
 			message: "Final commit ordinal must be a non-negative integer",
 		});
 	}

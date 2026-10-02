@@ -2,28 +2,15 @@ import {
 	paginationOptsValidator,
 	paginationResultValidator,
 } from "convex/server";
-import { v } from "convex/values";
-import { Schema } from "effect";
+import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { type QueryCtx, query } from "./_generated/server";
-import { authErrorCodes, requireCurrentOperatorId } from "./lib/auth";
-import { atPublicEdge } from "./lib/publicEdge";
-import { getAvailableOwnedSession, sessionErrorCodes } from "./lib/sessions";
+import { requireCurrentOperatorId } from "./lib/auth";
+import { getAvailableOwnedSession } from "./lib/sessions";
 
 const MAX_TRANSCRIPT_SEGMENTS = 1_000;
 
 const MAX_TRANSCRIPT_CHARS = 100_000;
-
-class TranscriptTooLarge extends Schema.TaggedError<TranscriptTooLarge>()(
-	"TranscriptTooLarge",
-	{ message: Schema.String },
-) {}
-
-const publicErrorCodes = {
-	...authErrorCodes,
-	...sessionErrorCodes,
-	TranscriptTooLarge: "transcript_too_large",
-};
 
 const segmentValidator = v.object({
 	_id: v.id("segments"),
@@ -49,7 +36,8 @@ async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 		.take(MAX_TRANSCRIPT_SEGMENTS + 1);
 
 	if (segments.length > MAX_TRANSCRIPT_SEGMENTS) {
-		throw new TranscriptTooLarge({
+		throw new ConvexError({
+			code: "transcript_too_large",
 			message: "Transcript is too large to download",
 		});
 	}
@@ -57,7 +45,8 @@ async function readTranscriptText(ctx: QueryCtx, sessionId: Id<"sessions">) {
 	const transcript = segments.map((segment) => segment.sourceText).join("\n");
 
 	if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-		throw new TranscriptTooLarge({
+		throw new ConvexError({
+			code: "transcript_too_large",
 			message: "Transcript is too large to download",
 		});
 	}
@@ -115,8 +104,5 @@ export const listBySession = query({
 export const transcriptText = query({
 	args: { sessionId: v.id("sessions") },
 	returns: v.string(),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () =>
-			readTranscriptText(ctx, args.sessionId),
-		),
+	handler: async (ctx, args) => readTranscriptText(ctx, args.sessionId),
 });

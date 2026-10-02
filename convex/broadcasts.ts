@@ -1,25 +1,15 @@
 import { v } from "convex/values";
 import { internalMutation, mutation } from "./_generated/server";
-import { authErrorCodes } from "./lib/auth";
 import type { HeartbeatExpiryArgs } from "./lib/broadcasts";
 import {
 	abandonBroadcast,
-	broadcastErrorCodes,
 	markBroadcastLost,
 	resumeBroadcast,
 	sendHeartbeat,
 	startBroadcast,
 	stopBroadcast,
 } from "./lib/broadcasts";
-import { atPublicEdge } from "./lib/publicEdge";
-import { sessionErrorCodes } from "./lib/sessions";
 import { broadcastStatusValidator } from "./schema";
-
-const publicErrorCodes = {
-	...authErrorCodes,
-	...broadcastErrorCodes,
-	...sessionErrorCodes,
-};
 
 const broadcastResultValidator = v.object({
 	broadcastId: v.id("broadcasts"),
@@ -32,15 +22,13 @@ const broadcastResultValidator = v.object({
 export const start = mutation({
 	args: { sessionId: v.id("sessions") },
 	returns: broadcastResultValidator,
-	handler: (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => startBroadcast(ctx, args.sessionId)),
+	handler: (ctx, args) => startBroadcast(ctx, args.sessionId),
 });
 
 export const heartbeat = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: v.null(),
-	handler: (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => sendHeartbeat(ctx, args.broadcastId)),
+	handler: (ctx, args) => sendHeartbeat(ctx, args.broadcastId),
 });
 
 export const stop = mutation({
@@ -49,26 +37,19 @@ export const stop = mutation({
 		finalCommitOrdinal: v.optional(v.number()),
 	},
 	returns: broadcastResultValidator,
-	handler: (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => stopBroadcast(ctx, args)),
+	handler: (ctx, args) => stopBroadcast(ctx, args),
 });
 
 export const resume = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: broadcastResultValidator,
-	handler: (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () =>
-			resumeBroadcast(ctx, args.broadcastId),
-		),
+	handler: (ctx, args) => resumeBroadcast(ctx, args.broadcastId),
 });
 
 export const abandon = mutation({
 	args: { broadcastId: v.id("broadcasts") },
 	returns: broadcastResultValidator,
-	handler: (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () =>
-			abandonBroadcast(ctx, args.broadcastId),
-		),
+	handler: (ctx, args) => abandonBroadcast(ctx, args.broadcastId),
 });
 
 export const markLost = internalMutation({

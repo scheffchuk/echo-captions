@@ -4,7 +4,7 @@
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import schema from "../schema";
-import { NotAuthenticated, requireCurrentOperatorId } from "./auth";
+import { requireCurrentOperatorId } from "./auth";
 
 const modules = Object.fromEntries(
 	Object.entries(import.meta.glob("../**/*.ts")).map(([key, loader]) => [
@@ -27,7 +27,9 @@ describe("requireCurrentOperatorId", () => {
 
 		await expect(
 			t.run((ctx) => requireCurrentOperatorId(ctx)),
-		).rejects.toBeInstanceOf(NotAuthenticated);
+		).rejects.toMatchObject({
+			data: { code: "not_authenticated", message: "Not authenticated" },
+		});
 	});
 
 	it("denies a deleted account", async () => {
@@ -48,7 +50,9 @@ describe("requireCurrentOperatorId", () => {
 			t
 				.withIdentity(identityFor(userId))
 				.run((ctx) => requireCurrentOperatorId(ctx)),
-		).rejects.toBeInstanceOf(NotAuthenticated);
+		).rejects.toMatchObject({
+			data: { code: "not_authenticated", message: "Not authenticated" },
+		});
 	});
 
 	it("returns the signed-in user id", async () => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	canonicalizeTranslationMappings,
-	MappingValidationError,
 	translationDocuments,
 } from "./translationMappings";
 
@@ -38,7 +37,11 @@ describe("translation mappings", () => {
 			canonicalize([
 				{ term: "Echo", targetLanguage: "", translation: "エコー" },
 			]),
-		).toThrow(MappingValidationError);
+		).toThrow(
+			expect.objectContaining({
+				data: expect.objectContaining({ code: "mapping_validation_error" }),
+			}),
+		);
 	});
 
 	it("rejects duplicate case-insensitive term and target pairs", async () => {
@@ -47,7 +50,11 @@ describe("translation mappings", () => {
 				{ term: "Echo", targetLanguage: "ja", translation: "エコー" },
 				{ term: "echo", targetLanguage: "JA", translation: "反響" },
 			]),
-		).toThrow(MappingValidationError);
+		).toThrow(
+			expect.objectContaining({
+				data: expect.objectContaining({ code: "mapping_validation_error" }),
+			}),
+		);
 	});
 
 	it("counts Unicode characters and enforces the 100/200 limits", async () => {
@@ -55,7 +62,11 @@ describe("translation mappings", () => {
 			canonicalize([
 				{ term: "😀".repeat(201), targetLanguage: "ja", translation: "x" },
 			]),
-		).toThrow(MappingValidationError);
+		).toThrow(
+			expect.objectContaining({
+				data: expect.objectContaining({ code: "mapping_validation_error" }),
+			}),
+		);
 
 		expect(() =>
 			canonicalize(
@@ -65,7 +76,11 @@ describe("translation mappings", () => {
 					translation: "x",
 				})),
 			),
-		).toThrow(MappingValidationError);
+		).toThrow(
+			expect.objectContaining({
+				data: expect.objectContaining({ code: "mapping_validation_error" }),
+			}),
+		);
 	});
 
 	it("matches case-insensitively without matching inside letter-number tokens", async () => {

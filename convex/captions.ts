@@ -16,69 +16,42 @@ import {
 	query,
 } from "./_generated/server";
 import { convexConfigLayer } from "./effect/config";
+import { requireCurrentOperatorId } from "./lib/auth";
 import {
 	acceptBroadcastCommit,
 	completeBroadcastCommit,
-	getOperatorSession,
 	retryBroadcastCommit,
 	type TargetCompletion,
+	targetTranslationResultValidator,
 } from "./lib/broadcastCommits";
-import { broadcastErrorCodes } from "./lib/broadcasts";
 import { GoogleTranslate } from "./lib/googleTranslate";
-import { atPublicEdge } from "./lib/publicEdge";
+import { getOwnedSession } from "./lib/sessions";
 import { translationDocuments } from "./lib/translationMappings";
 import {
-	acceptedCommitStatusValidator,
+	acceptedCommitTableValidator,
 	acceptedCommitTargetStatusValidator,
 	segmentStatusValidator,
 	translationMappingValidator,
 } from "./schema";
 
-const acceptedCommitReceiptValidator = v.object({
-	acceptedCommitId: v.id("acceptedCommits"),
-	commitId: v.string(),
-	status: acceptedCommitStatusValidator,
-	sequence: v.number(),
-	targetCount: v.number(),
-	completedTargetCount: v.number(),
-	failedTargetCount: v.number(),
-	segmentId: v.union(v.id("segments"), v.null()),
-});
+const operatorCommitValidator = acceptedCommitTableValidator
+	.omit("translationMappingRevisionId", "segmentId")
+	.extend({
+		acceptedCommitId: v.id("acceptedCommits"),
+		translations: v.record(v.string(), v.string()),
+		segmentId: v.union(v.id("segments"), v.null()),
+		segmentStatus: v.union(segmentStatusValidator, v.null()),
+	});
 
-const operatorCommitValidator = v.object({
-	acceptedCommitId: v.id("acceptedCommits"),
-	commitId: v.string(),
-	sessionId: v.id("sessions"),
-	broadcastId: v.id("broadcasts"),
-	broadcastSequence: v.number(),
-	commitOrdinal: v.number(),
-	sequence: v.number(),
-	sourceText: v.string(),
-	sourceLanguage: v.string(),
-	translationTargets: v.array(v.string()),
-	status: acceptedCommitStatusValidator,
-	targetCount: v.number(),
-	completedTargetCount: v.number(),
-	failedTargetCount: v.number(),
-	translations: v.record(v.string(), v.string()),
-	segmentId: v.union(v.id("segments"), v.null()),
-	segmentStatus: v.union(segmentStatusValidator, v.null()),
-	error: v.optional(v.string()),
-});
-
-const targetTranslationResultValidator = v.union(
-	v.object({
-		kind: v.literal("translated"),
-		targetId: v.id("acceptedCommitTargets"),
-		targetLanguage: v.string(),
-		translation: v.string(),
-	}),
-	v.object({
-		kind: v.literal("failed"),
-		targetId: v.id("acceptedCommitTargets"),
-		targetLanguage: v.string(),
-		error: v.string(),
-	}),
+const acceptedCommitReceiptValidator = operatorCommitValidator.pick(
+	"acceptedCommitId",
+	"commitId",
+	"status",
+	"sequence",
+	"targetCount",
+	"completedTargetCount",
+	"failedTargetCount",
+	"segmentId",
 );
 
 const targetContextValidator = v.union(
@@ -109,8 +82,7 @@ export const acceptCommit = mutation({
 		sourceLanguage: v.string(),
 	},
 	returns: acceptedCommitReceiptValidator,
-	handler: (ctx, args) =>
-		atPublicEdge(broadcastErrorCodes, () => acceptBroadcastCommit(ctx, args)),
+	handler: (ctx, args) => acceptBroadcastCommit(ctx, args),
 });
 
 export const retryCommit = mutation({
@@ -158,7 +130,8 @@ export const listOperatorCommits = query({
 	},
 	returns: paginationResultValidator(operatorCommitValidator),
 	handler: async (ctx, args) => {
-		const session = await getOperatorSession(ctx, args.sessionId);
+		const operatorId = await requireCurrentOperatorId(ctx);
+		const session = await getOwnedSession(ctx, args.sessionId, operatorId);
 
 		const page = await ctx.db
 			.query("acceptedCommits")

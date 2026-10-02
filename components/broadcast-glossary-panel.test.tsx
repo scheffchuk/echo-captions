@@ -60,6 +60,39 @@ beforeEach(() => {
 });
 
 describe("BroadcastGlossaryPanel", () => {
+	it("keeps edits when another draft row is added and removed", async () => {
+		const user = userEvent.setup();
+		render(<GlossaryHarness />);
+
+		const term = screen.getByPlaceholderText("e.g. shici");
+		const replacement = screen.getByPlaceholderText("e.g. poetry");
+		await user.clear(term);
+		await user.type(term, "Echo Prime");
+		await user.clear(replacement);
+		await user.type(replacement, "エコー Prime");
+		await user.click(screen.getByRole("button", { name: "Add mapping" }));
+		await user.click(
+			screen.getAllByRole("button", { name: "Remove mapping" })[1],
+		);
+
+		expect(screen.getByPlaceholderText("e.g. shici")).toBe(term);
+		expect(screen.getByPlaceholderText("e.g. poetry")).toBe(replacement);
+		await user.click(screen.getByRole("button", { name: "Save glossary" }));
+
+		await waitFor(() => expect(updateMappings).toHaveBeenCalledTimes(1));
+		expect(updateMappings).toHaveBeenCalledWith({
+			sessionId,
+			expectedRevisionId: revisionId,
+			translationMappings: [
+				{
+					term: "Echo Prime",
+					targetLanguage: "ja",
+					translation: "エコー Prime",
+				},
+			],
+		});
+	});
+
 	it("projects the draft without row IDs when saving", async () => {
 		const user = userEvent.setup();
 		render(<GlossaryHarness />);

@@ -1,34 +1,6 @@
-import { Schema } from "effect";
+import { ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { Unauthorized } from "./auth";
-
-export class SessionNotFound extends Schema.TaggedError<SessionNotFound>()(
-	"SessionNotFound",
-	{ message: Schema.String },
-) {}
-
-export class SessionDeleting extends Schema.TaggedError<SessionDeleting>()(
-	"SessionDeleting",
-	{ message: Schema.String },
-) {}
-
-export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
-	"SessionBusy",
-	{ message: Schema.String },
-) {}
-
-export class InvalidSessionTransition extends Schema.TaggedError<InvalidSessionTransition>()(
-	"InvalidSessionTransition",
-	{ message: Schema.String },
-) {}
-
-export const sessionErrorCodes = {
-	InvalidSessionTransition: "invalid_session_transition",
-	SessionBusy: "session_busy",
-	SessionDeleting: "session_deleting",
-	SessionNotFound: "session_not_found",
-} as const;
 
 export async function getOwnedSession(
 	ctx: QueryCtx | MutationCtx,
@@ -38,11 +10,14 @@ export async function getOwnedSession(
 	const session = await ctx.db.get("sessions", sessionId);
 
 	if (!session) {
-		throw new SessionNotFound({ message: "Session not found" });
+		throw new ConvexError({
+			code: "session_not_found",
+			message: "Session not found",
+		});
 	}
 
 	if (session.ownerId !== ownerId) {
-		throw new Unauthorized({ message: "Unauthorized" });
+		throw new ConvexError({ code: "unauthorized", message: "Unauthorized" });
 	}
 
 	return session;
@@ -56,7 +31,10 @@ export async function getAvailableOwnedSession(
 	const session = await getOwnedSession(ctx, sessionId, ownerId);
 
 	if (session.deletionRequestedAt !== undefined) {
-		throw new SessionDeleting({ message: "Session is being deleted" });
+		throw new ConvexError({
+			code: "session_deleting",
+			message: "Session is being deleted",
+		});
 	}
 
 	return session;

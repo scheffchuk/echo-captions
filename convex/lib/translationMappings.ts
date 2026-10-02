@@ -1,19 +1,10 @@
+import { ConvexError } from "convex/values";
 import { Schema } from "effect";
 import { normalizeLanguageCode } from "../../shared/languages";
 import {
 	canonicalizeTranslationMappings as canonicalizeMappingPolicy,
 	type TranslationMapping,
 } from "../../shared/translationMappings";
-
-export class MappingValidationError extends Schema.TaggedError<MappingValidationError>()(
-	"MappingValidationError",
-	{ message: Schema.String },
-) {}
-
-export class MappingRevisionConflict extends Schema.TaggedError<MappingRevisionConflict>()(
-	"MappingRevisionConflict",
-	{ message: Schema.String },
-) {}
 
 /** A provider returned a fixed mapping occurrence that cannot be trusted. */
 export class MappingIntegrityError extends Schema.TaggedError<MappingIntegrityError>()(
@@ -55,7 +46,8 @@ export function canonicalizeTranslationMappings(
 	const result = canonicalizeMappingPolicy(mappings, audienceLanguages);
 
 	if (!result.ok) {
-		throw new MappingValidationError({
+		throw new ConvexError({
+			code: "mapping_validation_error",
 			message: result.issues.map((issue) => issue.message).join(" "),
 		});
 	}

@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, type Infer, v } from "convex/values";
 import {
 	canonicalTranslationMappingsEqual,
 	filterMappingsForAudience,
@@ -13,37 +13,23 @@ import {
 	type QueryCtx,
 	query,
 } from "./_generated/server";
-import {
-	authErrorCodes,
-	getCurrentOperatorId,
-	requireCurrentOperatorId,
-} from "./lib/auth";
+import { getCurrentOperatorId, requireCurrentOperatorId } from "./lib/auth";
 import {
 	type projectBroadcast,
 	readBroadcastProjection,
 } from "./lib/broadcasts";
 import {
 	computeAudienceLanguages,
-	languageErrorCodes,
 	normalizeLanguageList,
 	validateAudienceLanguagesExtra,
 	validateSpokenLanguages,
 } from "./lib/languages";
-import { atPublicEdge } from "./lib/publicEdge";
 import {
 	getAvailableOwnedSession,
 	getOwnedSession,
-	InvalidSessionTransition,
-	SessionBusy,
-	sessionErrorCodes,
 	uniqueSessionSlug,
 } from "./lib/sessions";
-import {
-	canonicalizeTranslationMappings,
-	MappingRevisionConflict,
-	MappingValidationError,
-} from "./lib/translationMappings";
-
+import { canonicalizeTranslationMappings } from "./lib/translationMappings";
 import {
 	broadcastStatusValidator,
 	sessionDocValidator,
@@ -52,21 +38,13 @@ import {
 
 const SESSION_DELETE_BATCH_SIZE = 100;
 
-const publicErrorCodes = {
-	...authErrorCodes,
-	...languageErrorCodes,
-	...sessionErrorCodes,
-	MappingRevisionConflict: "mapping_revision_conflict",
-	MappingValidationError: "mapping_validation_error",
-};
-
-const eventFields = {
+const eventFields = v.object({
 	description: v.optional(v.string()),
 	eventDate: v.optional(v.number()),
 	spokenLanguages: v.array(v.string()),
 	audienceLanguagesExtra: v.optional(v.array(v.string())),
 	translationMappings: v.optional(v.array(translationMappingValidator)),
-};
+});
 
 const sessionValidator = sessionDocValidator.extend({
 	translationMappings: v.array(translationMappingValidator),
@@ -95,13 +73,7 @@ const publicSessionValidator = sessionValidator
 		activeBroadcast: activeBroadcastValidator,
 	});
 
-type EventFields = {
-	description?: string;
-	eventDate?: number;
-	spokenLanguages: string[];
-	audienceLanguagesExtra?: string[];
-	translationMappings?: TranslationMapping[];
-};
+type EventFields = Infer<typeof eventFields>;
 
 async function getCurrentMappingRevision(
 	ctx: MutationCtx,
@@ -115,7 +87,8 @@ async function getCurrentMappingRevision(
 	);
 
 	if (!revision || revision.sessionId !== session._id) {
-		throw new MappingValidationError({
+		throw new ConvexError({
+			code: "mapping_validation_error",
 			message: "The Session mapping revision is unavailable",
 		});
 	}
@@ -291,7 +264,8 @@ async function patchTranslationMappings(
 	const currentRevisionId = session.translationMappingRevisionId ?? null;
 
 	if (args.expectedRevisionId !== currentRevisionId) {
-		throw new MappingRevisionConflict({
+		throw new ConvexError({
+			code: "mapping_revision_conflict",
 			message: "Glossary changed elsewhere. Reload it before saving.",
 		});
 	}
@@ -405,7 +379,8 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 	);
 
 	if (broadcastProjection.activeBroadcast) {
-		throw new InvalidSessionTransition({
+		throw new ConvexError({
+			code: "invalid_session_transition",
 			message:
 				"Resolve the active or Lost Broadcast before deleting the Session",
 		});
@@ -419,7 +394,8 @@ async function removeSession(ctx: MutationCtx, sessionId: Id<"sessions">) {
 		.first();
 
 	if (pendingAcceptedCommit) {
-		throw new SessionBusy({
+		throw new ConvexError({
+			code: "session_busy",
 			message: "Wait for active translations to finish before deleting",
 		});
 	}
@@ -524,11 +500,10 @@ async function deleteSessionBatch(ctx: MutationCtx, sessionId: Id<"sessions">) {
 export const create = mutation({
 	args: {
 		title: v.string(),
-		...eventFields,
+		...eventFields.fields,
 	},
 	returns: v.object({ slug: v.string() }),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => createSession(ctx, args)),
+	handler: async (ctx, args) => createSession(ctx, args),
 });
 
 export const listMine = query({
@@ -588,9 +563,7 @@ export const updateDescription = mutation({
 	},
 	returns: v.null(),
 	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () =>
-			patchDescription(ctx, args.sessionId, args.description),
-		),
+		patchDescription(ctx, args.sessionId, args.description),
 });
 
 export const updateTranslationMappings = mutation({
@@ -603,8 +576,7 @@ export const updateTranslationMappings = mutation({
 		revisionId: v.union(v.id("translationMappingRevisions"), v.null()),
 		changed: v.boolean(),
 	}),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => patchTranslationMappings(ctx, args)),
+	handler: async (ctx, args) => patchTranslationMappings(ctx, args),
 });
 
 export const updateLanguages = mutation({
@@ -614,8 +586,7 @@ export const updateLanguages = mutation({
 		audienceLanguagesExtra: v.optional(v.array(v.string())),
 	},
 	returns: v.null(),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => patchLanguages(ctx, args)),
+	handler: async (ctx, args) => patchLanguages(ctx, args),
 });
 
 export const updateTitle = mutation({
@@ -624,10 +595,7 @@ export const updateTitle = mutation({
 		title: v.string(),
 	},
 	returns: v.null(),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () =>
-			patchTitle(ctx, args.sessionId, args.title),
-		),
+	handler: async (ctx, args) => patchTitle(ctx, args.sessionId, args.title),
 });
 
 export const deleteSession = mutation({
@@ -635,8 +603,7 @@ export const deleteSession = mutation({
 		sessionId: v.id("sessions"),
 	},
 	returns: v.null(),
-	handler: async (ctx, args) =>
-		atPublicEdge(publicErrorCodes, () => removeSession(ctx, args.sessionId)),
+	handler: async (ctx, args) => removeSession(ctx, args.sessionId),
 });
 
 export const deleteBatch = internalMutation({

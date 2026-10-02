@@ -93,14 +93,18 @@ describe("public Convex authorization boundaries", () => {
 
 		await expect(
 			other.query(api.segments.transcriptText, { sessionId }),
-		).rejects.toThrow();
+		).rejects.toMatchObject({
+			data: { code: "unauthorized", message: "Unauthorized" },
+		});
 
 		await expect(
 			other.mutation(api.sessions.updateTitle, {
 				sessionId,
 				title: "Attacker title",
 			}),
-		).rejects.toThrow();
+		).rejects.toMatchObject({
+			data: { code: "unauthorized", message: "Unauthorized" },
+		});
 
 		expect(
 			await t.run(

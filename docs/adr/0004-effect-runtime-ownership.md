@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-28); amended 2026-09-21 and 2026-10-01
+Accepted (2026-08-28); amended 2026-09-21, 2026-10-01, and 2026-10-02
 
 ## Context
 
@@ -61,3 +61,9 @@ The recording hook owns command execution and mounted lifetime together. The scr
 - Server-accepted abandonment remains successful after a disconnect timeout; that timeout is presented once as a separate cleanup error. Server rejection still releases media and retains Rejected captures, while leaving server recovery available.
 - Native Convex and ElevenLabs hooks retain their state ownership. Feature-local production and controlled transport adapters let tests render the same recording and realtime hooks under Strict Mode, departure, and remounts. Connection-scoped event handlers prevent callbacks from an earlier connection reaching a later generation.
 - The installed Scribe SDK acquires microphone resources asynchronously after socket readiness. Its adapter makes close idempotent and releases audio cleanup installed after departure. After an acknowledgement timeout, capture admission closes but a mounted hook waits for the native close event before reconnecting, because that SDK event resets its connection reference. Native SDK tests run with browser export conditions and controlled browser primitives.
+
+## Amendment (2026-10-02)
+
+Expected database failures use `ConvexError({ code, message })` directly. This supersedes the database error conversion in decisions 4 and 5: tagged error classes and per-domain code maps added no policy beyond the existing public payload. Shared ownership checks now serve Sessions, Broadcasts, and Accepted commits without translating between error representations. Public codes and messages remain unchanged; unexpected persistence failures and defects still throw ordinary errors.
+
+Provider failures retain their tagged errors for retry classification and safe presentation at the action edge. Browser operational failures also retain their existing tagged errors.

@@ -12,14 +12,10 @@ import {
 } from "@/components/ui/select";
 import { getCommonLanguageName } from "@/lib/languages";
 import type { TranslationMapping } from "@/shared/translationMappings";
-import {
-	addTranslationMappingDraftRow,
-	createTranslationMappingDraft,
-	removeTranslationMappingDraftRow,
-	type TranslationMappingDraftIssue,
-	type TranslationMappingDraftRow,
-	type TranslationMappingIdFactory,
-	updateTranslationMappingDraftRow,
+import type {
+	TranslationMappingDraftIssue,
+	TranslationMappingDraftRow,
+	TranslationMappingIdFactory,
 } from "@/src/lib/translationMappingDraft";
 
 const browserIdFactory: TranslationMappingIdFactory = () => crypto.randomUUID();
@@ -49,10 +45,10 @@ export function TranslationMappingsField({
 	disabled?: boolean;
 	idFactory?: TranslationMappingIdFactory;
 }) {
-	const currentDraft = createTranslationMappingDraft({ rows: mappings });
-
 	const updateMapping = (id: string, patch: Partial<TranslationMapping>) => {
-		onChange(updateTranslationMappingDraftRow(currentDraft, id, patch).rows);
+		onChange(
+			mappings.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+		);
 	};
 
 	const globalIssues = issues.filter((item) => item.rowId === "$draft");
@@ -126,10 +122,7 @@ export function TranslationMappingsField({
 								disabled={disabled}
 								aria-label="Remove mapping"
 								onClick={() =>
-									onChange(
-										removeTranslationMappingDraftRow(currentDraft, mapping.id)
-											.rows,
-									)
+									onChange(mappings.filter((row) => row.id !== mapping.id))
 								}
 							>
 								<X className="size-4" />
@@ -154,9 +147,15 @@ export function TranslationMappingsField({
 							: undefined
 					}
 					onClick={() =>
-						onChange(
-							addTranslationMappingDraftRow(currentDraft, idFactory).rows,
-						)
+						onChange([
+							...mappings,
+							{
+								id: idFactory(),
+								term: "",
+								targetLanguage: "",
+								translation: "",
+							},
+						])
 					}
 				>
 					<Plus className="size-4" />

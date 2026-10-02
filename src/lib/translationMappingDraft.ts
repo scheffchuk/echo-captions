@@ -76,42 +76,6 @@ export function hydrateTranslationMappingDraft(
 	});
 }
 
-export function addTranslationMappingDraftRow(
-	draft: TranslationMappingDraft,
-	idFactory: TranslationMappingIdFactory,
-): TranslationMappingDraft {
-	return {
-		...draft,
-		rows: [
-			...draft.rows,
-			{ id: idFactory(), term: "", targetLanguage: "", translation: "" },
-		],
-	};
-}
-
-export function updateTranslationMappingDraftRow(
-	draft: TranslationMappingDraft,
-	rowId: string,
-	patch: Partial<TranslationMapping>,
-): TranslationMappingDraft {
-	return {
-		...draft,
-		rows: draft.rows.map((row) =>
-			row.id === rowId ? { ...row, ...patch } : row,
-		),
-	};
-}
-
-export function removeTranslationMappingDraftRow(
-	draft: TranslationMappingDraft,
-	rowId: string,
-): TranslationMappingDraft {
-	return {
-		...draft,
-		rows: draft.rows.filter((row) => row.id !== rowId),
-	};
-}
-
 function issue(
 	rowId: string,
 	field: TranslationMappingDraftField,

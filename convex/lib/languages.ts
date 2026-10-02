@@ -1,19 +1,10 @@
-import { Schema } from "effect";
+import { ConvexError } from "convex/values";
 import {
 	fromScribeCode,
 	isValidLanguageCode,
 	MAX_SPOKEN_LANGUAGES,
 	normalizeLanguageCode,
 } from "../../shared/languages";
-
-export class InvalidLanguage extends Schema.TaggedError<InvalidLanguage>()(
-	"InvalidLanguage",
-	{ message: Schema.String },
-) {}
-
-export const languageErrorCodes = {
-	InvalidLanguage: "invalid_language",
-} as const;
 
 export function normalizeLanguageList(codes: string[]): string[] {
 	const seen = new Set<string>();
@@ -72,18 +63,23 @@ export function validateSpokenLanguages(spokenLanguages: string[]) {
 	const normalized = normalizeLanguageList(spokenLanguages);
 
 	if (normalized.length < 1) {
-		throw new InvalidLanguage({ message: "Add at least one spoken language" });
+		throw new ConvexError({
+			code: "invalid_language",
+			message: "Add at least one spoken language",
+		});
 	}
 
 	if (normalized.length > MAX_SPOKEN_LANGUAGES) {
-		throw new InvalidLanguage({
+		throw new ConvexError({
+			code: "invalid_language",
 			message: `At most ${MAX_SPOKEN_LANGUAGES} spoken languages`,
 		});
 	}
 
 	for (const code of normalized) {
 		if (!isValidLanguageCode(code)) {
-			throw new InvalidLanguage({
+			throw new ConvexError({
+				code: "invalid_language",
 				message: `Unsupported language code: ${code}`,
 			});
 		}
@@ -100,7 +96,8 @@ export function validateAudienceLanguagesExtra(
 
 	for (const code of normalizedExtra) {
 		if (!isValidLanguageCode(code)) {
-			throw new InvalidLanguage({
+			throw new ConvexError({
+				code: "invalid_language",
 				message: `Unsupported language code: ${code}`,
 			});
 		}
@@ -109,7 +106,8 @@ export function validateAudienceLanguagesExtra(
 	const audience = computeAudienceLanguages(spokenLanguages, normalizedExtra);
 
 	if (audience.length < 1) {
-		throw new InvalidLanguage({
+		throw new ConvexError({
+			code: "invalid_language",
 			message: "Add at least one audience language",
 		});
 	}

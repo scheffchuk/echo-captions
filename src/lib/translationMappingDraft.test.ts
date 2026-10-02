@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { testId } from "@/test/ids";
 import {
-	addTranslationMappingDraftRow,
 	createTranslationMappingDraft,
 	hydrateTranslationMappingDraft,
 	isTranslationMappingDraftDirty,
 	markTranslationMappingDraftConflict,
 	projectTranslationMappingDraft,
 	reconcileTranslationMappingDraft,
-	removeTranslationMappingDraftRow,
 	type TranslationMappingDraft,
-	updateTranslationMappingDraftRow,
 } from "./translationMappingDraft";
 
 const audienceCodes = ["en", "ja"];
@@ -32,33 +29,21 @@ function draftWithRows(
 }
 
 describe("translation mapping draft", () => {
-	it("assigns opaque IDs once and keeps them through row edits", () => {
+	it("hydrates saved mappings with stable row IDs and their base revision", () => {
+		const revisionId = testId("translationMappingRevisions", "revision-1");
+
 		const draft = hydrateTranslationMappingDraft(
 			savedMappings,
-			testId("translationMappingRevisions", "revision-1"),
+			revisionId,
 			ids("saved-1"),
 		);
 
-		const rowId = draft.rows[0]?.id;
-
-		if (!rowId) throw new Error("expected a hydrated row");
-
-		const added = addTranslationMappingDraftRow(draft, ids("new-1"));
-
-		const edited = updateTranslationMappingDraftRow(added, rowId, {
-			translation: "Echo Prime",
+		expect(draft).toEqual({
+			rows: [{ id: "saved-1", ...savedMappings[0] }],
+			baseMappings: savedMappings,
+			baseRevisionId: revisionId,
+			conflict: false,
 		});
-
-		const removed = removeTranslationMappingDraftRow(edited, "new-1");
-
-		expect(removed.rows).toEqual([
-			{
-				id: "saved-1",
-				term: "Echo",
-				targetLanguage: "ja",
-				translation: "Echo Prime",
-			},
-		]);
 	});
 
 	it("reports row-level issues while retaining rows outside the audience", () => {
@@ -332,9 +317,10 @@ describe("translation mapping draft", () => {
 			conflict: false,
 		});
 
-		const dirty = updateTranslationMappingDraftRow(clean, "saved-1", {
-			translation: "Local change",
-		});
+		const dirty = {
+			...clean,
+			rows: [{ ...clean.rows[0], translation: "Local change" }],
+		};
 
 		const conflicted = reconcileTranslationMappingDraft(
 			dirty,

@@ -1,25 +1,10 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { Schema } from "effect";
+import { ConvexError } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
 
 type AuthCtx = QueryCtx | MutationCtx | ActionCtx;
-
-export class NotAuthenticated extends Schema.TaggedError<NotAuthenticated>()(
-	"NotAuthenticated",
-	{ message: Schema.String },
-) {}
-
-export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
-	"Unauthorized",
-	{ message: Schema.String },
-) {}
-
-export const authErrorCodes = {
-	NotAuthenticated: "not_authenticated",
-	Unauthorized: "unauthorized",
-} as const;
 
 export async function getCurrentOperatorId(
 	ctx: QueryCtx | MutationCtx,
@@ -39,7 +24,10 @@ export async function requireCurrentOperatorId(
 	const operatorId = await getCurrentOperatorId(ctx);
 
 	if (operatorId === null) {
-		throw new NotAuthenticated({ message: "Not authenticated" });
+		throw new ConvexError({
+			code: "not_authenticated",
+			message: "Not authenticated",
+		});
 	}
 
 	return operatorId;
@@ -52,7 +40,10 @@ export async function requireOperatorId(ctx: AuthCtx): Promise<Id<"users">> {
 			: await ctx.runQuery(internal.users.getCurrentOperator, {});
 
 	if (operatorId === null) {
-		throw new NotAuthenticated({ message: "Not authenticated" });
+		throw new ConvexError({
+			code: "not_authenticated",
+			message: "Not authenticated",
+		});
 	}
 
 	return operatorId;

@@ -131,6 +131,83 @@ async function finishOnlyTarget(
 }
 
 describe("Convex-owned caption acceptance", () => {
+	it.each([
+		"failed",
+		"canceled",
+	] as const)("drains a %s job once and ignores its callback after retry admission", async (kind) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "failed-job",
+			sourceText: "Retry this caption",
+			sourceLanguage: "en",
+		});
+
+		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!target?.workId) throw new Error("Expected a translation job");
+		// convex-test gives different Workpools component-local IDs; keep the old job distinct from its retry.
+		const completedWorkId = workId("completed-job");
+		await t.run((ctx) => ctx.db.patch(target._id, { workId: completedWorkId }));
+		await operator.mutation(api.broadcasts.stop, { broadcastId });
+
+		const event = {
+			workId: completedWorkId,
+			context: { acceptedCommitId: accepted.acceptedCommitId },
+			result: kind === "failed" ? { kind, error: "Action threw" } : { kind },
+		};
+
+		await operator.mutation(internal.captions.targetCompleted, event);
+		expect(await acceptedTargets(t, accepted.acceptedCommitId)).toMatchObject([
+			{
+				status: "failed",
+				error:
+					kind === "failed"
+						? "Translation failed unexpectedly"
+						: "Translation canceled",
+			},
+		]);
+		expect(
+			await t.run((ctx) => ctx.db.get("broadcasts", broadcastId)),
+		).toMatchObject({
+			status: "sealed",
+			pendingCommitCount: 0,
+		});
+
+		const retry = await operator.mutation(api.captions.retryCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+
+		await operator.mutation(internal.captions.targetCompleted, event);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "pending",
+			segmentId: retry.segmentId,
+		});
+
+		await finishOnlyTarget(
+			t,
+			operator,
+			accepted.acceptedCommitId,
+			"translated",
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "translated",
+			segmentId: retry.segmentId,
+		});
+	});
+
 	it("seals only after reverse-order translated and failed first outcomes finish", async () => {
 		const t = makeTest();
 
