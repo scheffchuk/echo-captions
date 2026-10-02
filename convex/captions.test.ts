@@ -94,7 +94,680 @@ async function acceptedTargets(
 	);
 }
 
+async function finishOnlyTarget(
+	t: CaptionTest,
+	operator: ReturnType<CaptionTest["withIdentity"]>,
+	acceptedCommitId: Id<"acceptedCommits">,
+	kind: "translated" | "failed",
+) {
+	const [target] = await acceptedTargets(t, acceptedCommitId);
+
+	if (!target?.workId) throw new Error("Expected a translation job");
+
+	const completion =
+		kind === "translated"
+			? {
+					kind,
+					targetId: target._id,
+					targetLanguage: target.targetLanguage,
+					translation: "Repaired",
+				}
+			: {
+					kind,
+					targetId: target._id,
+					targetLanguage: target.targetLanguage,
+					error: "Provider unavailable",
+				};
+
+	const event = {
+		workId: workId(target.workId),
+		context: { acceptedCommitId },
+		result: { kind: "success" as const, returnValue: completion },
+	};
+
+	await operator.mutation(internal.captions.targetCompleted, event);
+
+	return event;
+}
+
 describe("Convex-owned caption acceptance", () => {
+	it("seals only after reverse-order translated and failed first outcomes finish", async () => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const first = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "first",
+			sourceText: "First",
+			sourceLanguage: "en",
+		});
+
+		const second = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 2,
+			commitId: "second",
+			sourceText: "Second",
+			sourceLanguage: "en",
+		});
+
+		await operator.mutation(api.broadcasts.stop, {
+			broadcastId,
+			finalCommitOrdinal: 2,
+		});
+		await finishOnlyTarget(t, operator, second.acceptedCommitId, "failed");
+		expect(
+			await operator.query(api.sessions.getMineBySlug, {
+				slug: "caption-event",
+			}),
+		).toMatchObject({
+			activeBroadcast: { status: "stopping" },
+		});
+		await finishOnlyTarget(t, operator, first.acceptedCommitId, "translated");
+		expect(
+			await operator.query(api.sessions.getMineBySlug, {
+				slug: "caption-event",
+			}),
+		).toMatchObject({ activeBroadcast: null });
+
+		const captions = await operator.query(api.captions.listOperatorCommits, {
+			sessionId,
+			paginationOpts: { numItems: 10, cursor: null },
+		});
+
+		expect(
+			captions.page.map((commit) => [commit.commitId, commit.status]),
+		).toEqual([
+			["second", "failed"],
+			["first", "translated"],
+		]);
+	});
+	it.each([
+		"identity",
+		"translation",
+		"failure",
+	] as const)("rolls back a malformed %s completion through the registered mutation", async (invalid) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "malformed-completion",
+			sourceText: "Remain pending",
+			sourceLanguage: "en",
+		});
+
+		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!target?.workId) throw new Error("Expected a translation job");
+
+		const completion =
+			invalid === "failure"
+				? {
+						kind: "failed" as const,
+						targetId: target._id,
+						targetLanguage: target.targetLanguage,
+						error: " ",
+					}
+				: {
+						kind: "translated" as const,
+						targetId: target._id,
+						targetLanguage:
+							invalid === "identity" ? "de" : target.targetLanguage,
+						translation: invalid === "translation" ? "" : "Translated",
+					};
+
+		await expect(
+			operator.mutation(internal.captions.targetCompleted, {
+				workId: workId(target.workId),
+				context: { acceptedCommitId: accepted.acceptedCommitId },
+				result: { kind: "success", returnValue: completion },
+			}),
+		).rejects.toThrow(
+			{
+				identity: "Translation completion identity mismatch",
+				translation: "Translated completion has no translation",
+				failure: "Failed completion has no error classification",
+			}[invalid],
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({ status: "pending", segmentId: null });
+	});
+
+	it("drains mixed first outcomes without counting synchronous zero-target publication", async () => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+		]);
+
+		await t.run((ctx) =>
+			ctx.db.patch(sessionId, { spokenLanguages: ["en", "ja"] }),
+		);
+
+		const pending = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "first-pending",
+			sourceText: "Translate first",
+			sourceLanguage: "ja",
+		});
+
+		const immediate = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 2,
+			commitId: "second-synchronous",
+			sourceText: "Already in audience language",
+			sourceLanguage: "en",
+		});
+
+		expect(immediate.status).toBe("translated");
+		expect(
+			await operator.mutation(api.broadcasts.stop, { broadcastId }),
+		).toMatchObject({ status: "stopping", finalCommitOrdinal: 2 });
+		await finishOnlyTarget(t, operator, pending.acceptedCommitId, "failed");
+		expect(
+			await operator.mutation(api.broadcasts.stop, { broadcastId }),
+		).toMatchObject({ status: "sealed", finalCommitOrdinal: 2 });
+	});
+
+	it("rolls back a terminal outcome when first-publication accounting underflows", async () => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "underflow",
+			sourceText: "Must remain pending",
+			sourceLanguage: "en",
+		});
+
+		await t.run((ctx) => ctx.db.patch(broadcastId, { pendingCommitCount: 0 }));
+		await expect(
+			finishOnlyTarget(t, operator, accepted.acceptedCommitId, "translated"),
+		).rejects.toThrow("Broadcast pending commit count underflow");
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "pending",
+			segmentId: null,
+			completedTargetCount: 0,
+		});
+		expect(
+			await operator.query(api.segments.listBySession, {
+				sessionId,
+				paginationOpts: { numItems: 10, cursor: null },
+			}),
+		).toMatchObject({ page: [] });
+		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+		expect(target).toMatchObject({
+			status: "pending",
+			workId: expect.any(String),
+		});
+	});
+
+	it.each([
+		"Segment",
+		"Broadcast",
+	] as const)("rejects repair when the stored %s reference is missing", async (missing) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "missing-segment",
+			sourceText: "Corrupted outcome",
+			sourceLanguage: "en",
+		});
+
+		await finishOnlyTarget(t, operator, accepted.acceptedCommitId, "failed");
+
+		const finished = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
+
+		if (!finished?.segmentId) throw new Error("Expected a finished Segment");
+		const segmentId = finished.segmentId;
+		await t.run((ctx) =>
+			ctx.db.delete(missing === "Segment" ? segmentId : broadcastId),
+		);
+		await expect(
+			operator.mutation(api.captions.retryCommit, {
+				acceptedCommitId: accepted.acceptedCommitId,
+			}),
+		).rejects.toThrow(
+			missing === "Segment"
+				? "Accepted commit references a missing Segment"
+				: "Accepted commit references a missing or wrong Broadcast",
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({ status: "failed" });
+	});
+
+	it.each([
+		"missing",
+		"translated",
+	] as const)("rejects repair with a corrupt %s target set", async (corruption) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "corrupt-targets",
+			sourceText: "Fallback",
+			sourceLanguage: "en",
+		});
+
+		await finishOnlyTarget(t, operator, accepted.acceptedCommitId, "failed");
+		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!target) throw new Error("Expected target");
+		await t.run(async (ctx) => {
+			if (corruption === "missing") await ctx.db.delete(target._id);
+			else
+				await ctx.db.patch(target._id, {
+					status: "translated",
+					translation: "Done",
+				});
+		});
+		await expect(
+			operator.mutation(api.captions.retryCommit, {
+				acceptedCommitId: accepted.acceptedCommitId,
+			}),
+		).rejects.toThrow(
+			corruption === "missing"
+				? "Accepted commit targets are unavailable"
+				: "Failed Accepted commit has inconsistent target state",
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({ status: "failed" });
+	});
+
+	it.each([
+		"missing",
+		"invalid",
+	] as const)("rolls back repair completion with a %s Broadcast", async (corruption) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "repair-corruption",
+			sourceText: "Fallback",
+			sourceLanguage: "en",
+		});
+
+		await finishOnlyTarget(t, operator, accepted.acceptedCommitId, "failed");
+		await operator.mutation(api.captions.retryCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+		await t.run(async (ctx) => {
+			if (corruption === "missing") await ctx.db.delete(broadcastId);
+			else await ctx.db.patch(broadcastId, { pendingCommitCount: -1 });
+		});
+		await expect(
+			finishOnlyTarget(t, operator, accepted.acceptedCommitId, "translated"),
+		).rejects.toThrow(
+			corruption === "missing"
+				? "Accepted commit references a missing or wrong Broadcast"
+				: "Broadcast pending commit count is negative",
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "pending",
+			segmentStatus: "failed",
+			translations: {},
+		});
+		expect(await acceptedTargets(t, accepted.acceptedCommitId)).toMatchObject([
+			{ status: "pending" },
+		]);
+	});
+
+	it.each([
+		{ count: -1, error: "Broadcast pending commit count is negative" },
+		{
+			count: 0.5,
+			error: "Broadcast pending commit count is not a safe integer",
+		},
+		{
+			count: 1,
+			error: "Broadcast pending commit count exceeds accepted positions",
+		},
+	])("rejects acceptance into invalid persisted Broadcast accounting ($count)", async ({
+		count,
+		error,
+	}) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		await t.run((ctx) =>
+			ctx.db.patch(broadcastId, { pendingCommitCount: count }),
+		);
+		await expect(
+			operator.mutation(api.captions.acceptCommit, {
+				sessionId,
+				broadcastId,
+				commitOrdinal: 1,
+				commitId: "invalid-accounting",
+				sourceText: "Never accepted",
+				sourceLanguage: "en",
+			}),
+		).rejects.toThrow(error);
+		expect(
+			await operator.query(api.captions.listOperatorCommits, {
+				sessionId,
+				paginationOpts: { numItems: 10, cursor: null },
+			}),
+		).toMatchObject({ page: [] });
+	});
+
+	it.each([
+		"active",
+		"lost",
+		"stopping",
+		"sealed",
+	] as const)("repairs a failed caption in a %s Broadcast without changing its position or drain", async (status) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const capture = {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "repair-in-any-state",
+			sourceText: "Repair later",
+			sourceLanguage: "en",
+		};
+
+		const accepted = await operator.mutation(
+			api.captions.acceptCommit,
+			capture,
+		);
+
+		const [liveTarget] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!liveTarget) throw new Error("Expected a live translation target");
+		// convex-test generates component-local IDs; distinguish the completed live job from a retry pool job.
+		await t.run((ctx) =>
+			ctx.db.patch(liveTarget._id, { workId: "completed-live-job" }),
+		);
+
+		const oldCompletion = await finishOnlyTarget(
+			t,
+			operator,
+			accepted.acceptedCommitId,
+			"failed",
+		);
+
+		const finished = await readOperatorCommit(
+			operator,
+			sessionId,
+			accepted.acceptedCommitId,
+		);
+
+		let unfinishedId: Id<"acceptedCommits"> | undefined;
+
+		if (status === "stopping") {
+			const unfinished = await operator.mutation(api.captions.acceptCommit, {
+				...capture,
+				commitOrdinal: 2,
+				commitId: "unfinished-initial",
+			});
+
+			unfinishedId = unfinished.acceptedCommitId;
+		}
+
+		if (status === "sealed" || status === "stopping")
+			await operator.mutation(api.broadcasts.stop, { broadcastId });
+
+		if (status === "lost") {
+			await t.run((ctx) =>
+				ctx.db.patch(broadcastId, { lastHeartbeatAt: Date.now() - 20_001 }),
+			);
+			await operator.mutation(internal.broadcasts.markLost, { broadcastId });
+		}
+
+		if (status === "sealed")
+			await operator.mutation(api.broadcasts.start, { sessionId });
+
+		const retried = await operator.mutation(api.captions.retryCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+
+		expect(retried).toMatchObject({
+			status: "pending",
+			segmentId: finished?.segmentId,
+		});
+		expect(
+			await operator.mutation(api.captions.retryCommit, {
+				acceptedCommitId: accepted.acceptedCommitId,
+			}),
+		).toEqual(retried);
+		await operator.mutation(internal.captions.targetCompleted, oldCompletion);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "pending",
+			broadcastId,
+			commitOrdinal: 1,
+			broadcastSequence: 1,
+			segmentId: finished?.segmentId,
+		});
+
+		if (unfinishedId)
+			await finishOnlyTarget(t, operator, unfinishedId, "translated");
+
+		if (status === "sealed" || status === "stopping")
+			expect(
+				await operator.mutation(api.broadcasts.stop, { broadcastId }),
+			).toMatchObject({ status: "sealed" });
+		await finishOnlyTarget(
+			t,
+			operator,
+			accepted.acceptedCommitId,
+			"translated",
+		);
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "translated",
+			broadcastId,
+			commitOrdinal: 1,
+			broadcastSequence: 1,
+			segmentId: finished?.segmentId,
+		});
+		const replay = await operator.mutation(api.captions.acceptCommit, capture);
+		expect(replay).toMatchObject({
+			status: "translated",
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+
+		const session = await operator.query(api.sessions.getMineBySlug, {
+			slug: "caption-event",
+		});
+
+		expect(session?.activeBroadcast?.status).toBe(
+			{ active: "active", lost: "lost", stopping: undefined, sealed: "active" }[
+				status
+			],
+		);
+
+		if (status === "sealed") expect(session?.activeBroadcast?.sequence).toBe(2);
+	});
+
+	it.each([
+		true,
+		false,
+	])("serializes deletion and repair admission when retry wins: %s", async (retryFirst) => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "repair-deletion-race",
+			sourceText: "Repair or delete",
+			sourceLanguage: "en",
+		});
+
+		await finishOnlyTarget(t, operator, accepted.acceptedCommitId, "failed");
+		await operator.mutation(api.broadcasts.stop, { broadcastId });
+
+		if (retryFirst) {
+			await operator.mutation(api.captions.retryCommit, {
+				acceptedCommitId: accepted.acceptedCommitId,
+			});
+			await expect(
+				operator.mutation(api.sessions.deleteSession, { sessionId }),
+			).rejects.toMatchObject({ data: { code: "session_busy" } });
+			await finishOnlyTarget(t, operator, accepted.acceptedCommitId, "failed");
+			await expect(
+				operator.mutation(api.sessions.deleteSession, { sessionId }),
+			).resolves.toBeNull();
+		} else {
+			await operator.mutation(api.sessions.deleteSession, { sessionId });
+			await expect(
+				operator.mutation(api.captions.retryCommit, {
+					acceptedCommitId: accepted.acceptedCommitId,
+				}),
+			).rejects.toMatchObject({ data: { code: "session_deleting" } });
+		}
+	});
+
+	it("seals after a first failed outcome while its retry is pending", async () => {
+		const t = makeTest();
+
+		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t, [
+			"en",
+			"ja",
+		]);
+
+		const accepted = await operator.mutation(api.captions.acceptCommit, {
+			sessionId,
+			broadcastId,
+			commitOrdinal: 1,
+			commitId: "repair-before-stop",
+			sourceText: "Repair later",
+			sourceLanguage: "en",
+		});
+
+		const [target] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!target?.workId) throw new Error("Expected a translation job");
+		await operator.mutation(internal.captions.targetCompleted, {
+			workId: workId(target.workId),
+			context: { acceptedCommitId: accepted.acceptedCommitId },
+			result: {
+				kind: "success",
+				returnValue: {
+					kind: "failed",
+					targetId: target._id,
+					targetLanguage: target.targetLanguage,
+					error: "Provider unavailable",
+				},
+			},
+		});
+
+		const retried = await operator.mutation(api.captions.retryCommit, {
+			acceptedCommitId: accepted.acceptedCommitId,
+		});
+
+		expect(retried.status).toBe("pending");
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "pending",
+			segmentStatus: "failed",
+			segmentId: retried.segmentId,
+		});
+		expect(
+			await operator.mutation(api.broadcasts.stop, { broadcastId }),
+		).toMatchObject({ status: "sealed", finalCommitOrdinal: 1 });
+		const [repairTarget] = await acceptedTargets(t, accepted.acceptedCommitId);
+
+		if (!repairTarget?.workId) throw new Error("Expected a retry job");
+		await operator.mutation(internal.captions.targetCompleted, {
+			workId: workId(repairTarget.workId),
+			context: { acceptedCommitId: accepted.acceptedCommitId },
+			result: {
+				kind: "success",
+				returnValue: {
+					kind: "translated",
+					targetId: repairTarget._id,
+					targetLanguage: repairTarget.targetLanguage,
+					translation: "Repaired",
+				},
+			},
+		});
+		expect(
+			await operator.mutation(api.broadcasts.stop, { broadcastId }),
+		).toMatchObject({ status: "sealed", finalCommitOrdinal: 1 });
+		expect(
+			await readOperatorCommit(operator, sessionId, accepted.acceptedCommitId),
+		).toMatchObject({
+			status: "translated",
+			segmentId: retried.segmentId,
+			translations: { ja: "Repaired" },
+		});
+	});
+
 	it("accepts an idempotent commit and rejects a conflicting snapshot", async () => {
 		const t = makeTest();
 		const { operator, sessionId, broadcastId } = await seedCaptionBroadcast(t);

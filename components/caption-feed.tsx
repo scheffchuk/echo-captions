@@ -1,5 +1,11 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import type { CaptionFeedItem } from "@/lib/caption-feed-items";
 import { getCommonLanguageName, segmentFontFamily } from "@/lib/languages";
@@ -54,6 +60,9 @@ export function CaptionFeed({
 	emptyMessage,
 	animateEntries = false,
 	className,
+	renderItemActions,
+	onLoadOlder,
+	canLoadOlder = false,
 }: {
 	items: CaptionFeedItem[];
 	languageCode: string;
@@ -64,12 +73,92 @@ export function CaptionFeed({
 	emptyMessage?: string;
 	animateEntries?: boolean;
 	className?: string;
+	renderItemActions?: (commitId: string) => ReactNode;
+	onLoadOlder?: () => void;
+	canLoadOlder?: boolean;
 }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
 	const [pinnedToLatest, setPinnedToLatest] = useState(true);
 	const pinnedToLatestRef = useRef(pinnedToLatest);
 	pinnedToLatestRef.current = pinnedToLatest;
+
+	const previousLayout = useRef<{
+		firstId: string | undefined;
+		height: number;
+		top: number;
+	} | null>(null);
+
+	const prependedHistory = useRef(false);
+	const readerAnchor = useRef<{ id: string; offset: number } | null>(null);
+
+	const captureReaderAnchor = () => {
+		const scroll = scrollRef.current;
+
+		if (!scroll) return;
+		const top = scroll.getBoundingClientRect().top;
+		const rows = scroll.querySelectorAll<HTMLElement>("[data-caption-id]");
+
+		const row = Array.from(rows).find(
+			(row) => row.getBoundingClientRect().bottom > top,
+		);
+
+		readerAnchor.current = row?.dataset.captionId
+			? {
+					id: row.dataset.captionId,
+					offset: row.getBoundingClientRect().top - top,
+				}
+			: null;
+	};
+
+	const restoreReaderAnchor = () => {
+		const scroll = scrollRef.current;
+		const anchor = readerAnchor.current;
+
+		if (!scroll || !anchor) return false;
+
+		const row = Array.from(
+			scroll.querySelectorAll<HTMLElement>("[data-caption-id]"),
+		).find((row) => row.dataset.captionId === anchor.id);
+
+		if (!row) return false;
+		scroll.scrollTop +=
+			row.getBoundingClientRect().top -
+			scroll.getBoundingClientRect().top -
+			anchor.offset;
+
+		return true;
+	};
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: layout inputs trigger measurement; anchor functions read only refs
+	useLayoutEffect(() => {
+		const scroll = scrollRef.current;
+
+		if (!scroll) return;
+		const previous = previousLayout.current;
+		prependedHistory.current = Boolean(
+			previous?.firstId &&
+				previous.firstId !== items[0]?.id &&
+				items.some((item) => item.id === previous.firstId),
+		);
+
+		if (previous && prependedHistory.current) {
+			if (!restoreReaderAnchor())
+				scroll.scrollTop = previous.top + scroll.scrollHeight - previous.height;
+			pinnedToLatestRef.current = false;
+			setPinnedToLatest(false);
+		} else if (!pinnedToLatestRef.current) {
+			restoreReaderAnchor();
+		}
+
+		if (!pinnedToLatestRef.current) captureReaderAnchor();
+
+		previousLayout.current = {
+			firstId: items[0]?.id,
+			height: scroll.scrollHeight,
+			top: scroll.scrollTop,
+		};
+	}, [items, loadingMore, languageCode, textScale]);
 
 	const lastItem = items.at(-1);
 
@@ -97,10 +186,11 @@ export function CaptionFeed({
 	// latestKey fingerprints content growth (partials, new lines, translations)
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll when content key changes
 	useEffect(() => {
-		if (!pinnedToLatest) return;
+		if (!pinnedToLatest || prependedHistory.current) return;
 		scrollToLatest();
 	}, [latestKey, pinnedToLatest]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: observer uses stable refs
 	useEffect(() => {
 		const content = contentRef.current;
 		const scroll = scrollRef.current;
@@ -108,7 +198,12 @@ export function CaptionFeed({
 		if (!content || !scroll) return;
 
 		const observer = new ResizeObserver(() => {
-			if (!pinnedToLatestRef.current) return;
+			if (!pinnedToLatestRef.current) {
+				restoreReaderAnchor();
+
+				return;
+			}
+
 			scroll.scrollTop = scroll.scrollHeight;
 		});
 
@@ -121,6 +216,9 @@ export function CaptionFeed({
 		const node = scrollRef.current;
 
 		if (!node) return;
+
+		if (previousLayout.current) previousLayout.current.top = node.scrollTop;
+		captureReaderAnchor();
 
 		const distanceFromBottom =
 			node.scrollHeight - node.clientHeight - node.scrollTop;
@@ -139,27 +237,51 @@ export function CaptionFeed({
 				ref={scrollRef}
 				onScroll={handleScroll}
 				className={cn(
-					"flex min-h-0 flex-1 flex-col overflow-y-auto",
+					"flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none]",
 					className,
 				)}
 			>
 				<div ref={contentRef} className="flex flex-col gap-4">
+					{onLoadOlder && (canLoadOlder || loadingMore) ? (
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="self-center"
+							disabled={loadingMore}
+							aria-label="Load older captions"
+							onClick={() => {
+								const scroll = scrollRef.current;
+
+								if (scroll && previousLayout.current) {
+									previousLayout.current.height = scroll.scrollHeight;
+									previousLayout.current.top = scroll.scrollTop;
+								}
+
+								onLoadOlder();
+							}}
+						>
+							{loadingMore ? "Loading older captions…" : "Load older captions"}
+						</Button>
+					) : null}
 					{!hasContent && emptyMessage ? (
 						<p className="text-sm text-muted-foreground">{emptyMessage}</p>
 					) : null}
-					{loadingMore ? (
+					{loadingMore && !onLoadOlder ? (
 						<p className="text-label text-muted-foreground text-center">
 							Loading more…
 						</p>
 					) : null}
 					{items.map((item, index) => (
-						<CaptionLine
-							key={item.id}
-							segment={item.segment}
-							languageCode={languageCode}
-							textScale={textScale}
-							animate={animateEntries && index === items.length - 1}
-						/>
+						<div key={item.id} data-caption-id={item.id}>
+							<CaptionLine
+								segment={item.segment}
+								languageCode={languageCode}
+								textScale={textScale}
+								animate={animateEntries && index === items.length - 1}
+							/>
+							{renderItemActions?.(item.id)}
+						</div>
 					))}
 					{showPartial && partialText ? (
 						<p

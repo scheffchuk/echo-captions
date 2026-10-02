@@ -22,3 +22,28 @@ The browser previously sent each VAD commit directly to a `commitAndTranslate` a
 - Browser code keeps only active Broadcast identity, the next Commit ordinal, and ephemeral mutation state; `mergeBroadcastCaptions` and its source-text tests are deleted.
 - Starting another Broadcast remains blocked until every prior Broadcast is drained or its unknown tail is explicitly abandoned.
 - This supersedes ADR-0001's direct browser-to-action delivery and custom lease-recovery decisions while preserving its VAD and atomic translation decisions.
+
+## Amendment: Broadcast accounting and caption repair (2026-10-02)
+
+Named Broadcast transaction workflows own acceptance, retry admission, completion,
+and first publication. Registered Convex functions remain their public and test
+surface. Broadcast position admission and drain updates are centralized in the
+Broadcast module; Workpool and Session deletion retain their existing ownership.
+
+Accepted positions are contiguous. Each position satisfies drain permanently
+when its first translated or failed Segment is published. Repairs reuse the same
+Commit ID, position, mapping snapshot, and Segment without reopening or delaying
+Broadcast sealing. A Lost Broadcast still requires abandonment of its unknown
+tail even after every known position has finished.
+
+An Operator can repair a failed caption in every Broadcast state while the
+Session exists and is not deleting, including after a later Broadcast starts.
+Different captions can be repaired concurrently; repeated admission for an
+already pending commit is a no-op. Deletion waits for admitted repairs. A repair
+retains the last finished caption for both Operator and audience, and publishes
+its replacement atomically. Retry progress is visible only to the Operator.
+Older captions can be loaded explicitly in bounded pages.
+
+The accounting transition requires old pending retries to finish before rollout.
+The conditional pause and read-only preflight are documented in
+[broadcast-accounting-rollout.md](../broadcast-accounting-rollout.md).

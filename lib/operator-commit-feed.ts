@@ -9,6 +9,7 @@ export type OperatorCommitProjection = {
 	sourceLanguage: string;
 	translations: Record<string, string>;
 	status: "pending" | "translated" | "failed";
+	segmentStatus?: "translated" | "failed" | null;
 };
 
 export function operatorCommitsToFeedItems(
@@ -20,7 +21,10 @@ export function operatorCommitsToFeedItems(
 			sourceText: commit.sourceText,
 			sourceLanguage: commit.sourceLanguage,
 			translations: commit.translations,
-			status: mapCommitStatus(commit.status),
+			status:
+				commit.status === "pending" && commit.segmentStatus
+					? commit.segmentStatus
+					: mapCommitStatus(commit.status),
 		},
 	}));
 }

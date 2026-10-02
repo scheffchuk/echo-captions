@@ -13,6 +13,7 @@ import { CaptionColumnShell, CaptionFeed } from "@/components/caption-feed";
 import { EditableHeader } from "@/components/editable-header";
 import { ConnectingBadge, LiveBadge } from "@/components/live-badge";
 import { PageLoading, SessionNotFound } from "@/components/loading-states";
+import { OperatorCaptionFeed } from "@/components/operator-caption-feed";
 import { OperatorChrome } from "@/components/operator-chrome";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -93,7 +94,8 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		"operator",
 	);
 
-	const operatorCommits = useSessionOperatorCommits(session?._id);
+	const operatorCaptions = useSessionOperatorCommits(session?._id, toast.error);
+	const operatorCommits = operatorCaptions.commits;
 
 	const isDual =
 		languagePair !== null &&
@@ -311,7 +313,8 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	) : isDual ? (
 		<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden md:flex-row">
 			<CaptionColumnShell className="min-h-0 flex-1" languageCode={lang1}>
-				<CaptionFeed
+				<OperatorCaptionFeed
+					operator={operatorCaptions}
 					className="p-4"
 					items={feedItems}
 					languageCode={lang1}
@@ -335,7 +338,8 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		</div>
 	) : (
 		<CaptionColumnShell className="min-h-0 flex-1" languageCode={lang1}>
-			<CaptionFeed
+			<OperatorCaptionFeed
+				operator={operatorCaptions}
 				className="p-4"
 				items={feedItems}
 				languageCode={lang1}

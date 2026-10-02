@@ -112,6 +112,53 @@ function Harness({
 }
 
 describe("CaptionFeed auto-scroll", () => {
+	it("preserves the visible caption offset when a repair resizes an earlier row", () => {
+		const view = render(
+			<CaptionFeed
+				items={[item("earlier", "Fallback"), item("reading", "Reading here")]}
+				languageCode="en"
+			/>,
+		);
+
+		const scroll = getScrollContainer(view.container);
+		mockOverflow(scroll, {
+			scrollHeight: 1000,
+			clientHeight: 200,
+			scrollTop: 220,
+		});
+		let readingTop = 200;
+
+		for (const row of view.container.querySelectorAll<HTMLElement>(
+			"[data-caption-id]",
+		)) {
+			row.getBoundingClientRect = () => {
+				const top =
+					(row.dataset.captionId === "earlier" ? 0 : readingTop) -
+					scroll.scrollTop;
+
+				return new DOMRect(0, top, 300, 100);
+			};
+		}
+
+		fireEvent.scroll(scroll);
+		readingTop = 360;
+		view.rerender(
+			<CaptionFeed
+				items={[
+					item("earlier", "A much longer repaired caption"),
+					item("reading", "Reading here"),
+				]}
+				languageCode="en"
+			/>,
+		);
+		expect(scroll.scrollTop).toBe(380);
+
+		const readingRow = view.container.querySelector<HTMLElement>(
+			'[data-caption-id="reading"]',
+		);
+
+		expect(readingRow?.getBoundingClientRect().top).toBe(-20);
+	});
 	it("scrolls to bottom when partialText grows while committed lines exist", async () => {
 		const user = userEvent.setup();
 

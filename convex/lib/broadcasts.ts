@@ -89,6 +89,29 @@ function broadcastStateError(state: BroadcastLifecycleState) {
 		return "Broadcast pending commit count is negative";
 	}
 
+	if (!Number.isSafeInteger(state.pendingCommitCount)) {
+		return "Broadcast pending commit count is not a safe integer";
+	}
+
+	if (
+		!Number.isSafeInteger(state.lastCommitOrdinal) ||
+		state.lastCommitOrdinal < 0
+	) {
+		return "Broadcast last commit ordinal is invalid";
+	}
+
+	if (state.pendingCommitCount > state.lastCommitOrdinal) {
+		return "Broadcast pending commit count exceeds accepted positions";
+	}
+
+	if (
+		state.finalCommitOrdinal !== undefined &&
+		(!Number.isSafeInteger(state.finalCommitOrdinal) ||
+			state.finalCommitOrdinal < 0)
+	) {
+		return "Broadcast final commit ordinal is invalid";
+	}
+
 	const hasFinalCommitOrdinal = state.finalCommitOrdinal !== undefined;
 	const isFinalized = state.status === "stopping" || state.status === "sealed";
 
@@ -341,6 +364,37 @@ export async function finishCommitDrain(
 	});
 
 	return await maybeSealBroadcast(ctx, broadcastId);
+}
+
+export async function admitBroadcastCommit(
+	ctx: MutationCtx,
+	args: {
+		sessionId: Id<"sessions">;
+		broadcastId: Id<"broadcasts">;
+		commitOrdinal: number;
+		targetCount: number;
+	},
+) {
+	const broadcast = await ctx.db.get("broadcasts", args.broadcastId);
+
+	if (!broadcast || broadcast.sessionId !== args.sessionId)
+		throw new BroadcastNotFound({ message: "Broadcast not found" });
+	assertValidBroadcastState(broadcast);
+
+	if (broadcast.status !== "active")
+		throw new BroadcastNotActive({ message: "Broadcast is no longer active" });
+
+	if (args.commitOrdinal !== broadcast.lastCommitOrdinal + 1)
+		throw new BroadcastConflict({
+			message: "Commit ordinal is not the next position",
+		});
+	await ctx.db.patch(broadcast._id, {
+		lastCommitOrdinal: args.commitOrdinal,
+		pendingCommitCount:
+			broadcast.pendingCommitCount + (args.targetCount > 0 ? 1 : 0),
+	});
+
+	return broadcast;
 }
 
 export type HeartbeatExpiryArgs = {
