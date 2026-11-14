@@ -21,3 +21,7 @@ Before writing any Effect code, first read `node_modules/effect/AGENTS.md`
 
 If you need to learn more about particular Effect apis and concepts that the
 guide doesn't cover, search through the source code in `node_modules/effect/src`.
+
+## UI checks
+
+Use agent-browser for UI checks (pnpm add -g agent-browser && agent-browser install). Before first use, run `agent-browser skills get core` and follow it. Before declaring a UI change done, open the dev server, snapshot, click through the changed flow, and check console errors.
