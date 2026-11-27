@@ -5,8 +5,13 @@ import { EchoWordmark } from "@/components/echo-wordmark";
 import { PageLoading } from "@/components/loading-states";
 import { OperatorChrome } from "@/components/operator-chrome";
 import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+	PasswordInput,
+	PasswordInputControl,
+	PasswordInputToggle,
+} from "@/components/ui/password-input";
 import {
 	getOperatorAuthErrorMessage,
 	type LoginFlow,
@@ -174,51 +179,58 @@ export function LoginForm({
 					onSubmit={(event) => void handleSubmit(event)}
 					className="space-y-4"
 				>
-					<div className="space-y-2">
-						<Label htmlFor="email" className="sr-only">
+					<Field
+						name="email"
+						invalid={(showValidation && email.length === 0) || undefined}
+					>
+						<FieldLabel htmlFor="email" className="sr-only">
 							Email
-						</Label>
+						</FieldLabel>
 						<Input
 							id="email"
 							name="email"
 							type="email"
 							autoComplete="username"
 							value={email}
-							onChange={(event) => setEmail(event.target.value)}
+							onValueChange={(value) => setEmail(value)}
 							onInvalid={() => setShowValidation(true)}
 							placeholder="Email"
 							required
 							disabled={isSubmitting}
 							className="w-full"
 						/>
-					</div>
-					<div className="space-y-2">
-						<Label htmlFor="password" className="sr-only">
+						{showValidation && email.length === 0 ? (
+							<FieldError>Email is required</FieldError>
+						) : null}
+					</Field>
+					<Field
+						name="password"
+						invalid={(showValidation && password.length < 8) || undefined}
+					>
+						<FieldLabel htmlFor="password" className="sr-only">
 							Password
-						</Label>
-						<Input
-							id="password"
+						</FieldLabel>
+						<PasswordInput
 							name="password"
-							type="password"
 							autoComplete={creating ? "new-password" : "current-password"}
 							value={password}
-							onChange={(event) => setPassword(event.target.value)}
-							onInvalid={() => setShowValidation(true)}
-							placeholder="Password"
+							onValueChange={(value) => setPassword(value)}
 							required
-							minLength={8}
 							disabled={isSubmitting}
 							className="w-full"
-						/>
+						>
+							<PasswordInputControl
+								id="password"
+								placeholder="Password"
+								minLength={8}
+								onInvalid={() => setShowValidation(true)}
+							/>
+							<PasswordInputToggle aria-label="Show password" />
+						</PasswordInput>
 						{showValidation && password.length < 8 ? (
-							<p className="text-sm text-destructive">
-								Password must be at least 8 characters
-							</p>
+							<FieldError>Password must be at least 8 characters</FieldError>
 						) : null}
-					</div>
-					{showValidation && email.length === 0 ? (
-						<p className="text-sm text-destructive">Email is required</p>
-					) : null}
+					</Field>
 					{submitError ? (
 						<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
 							{submitError}

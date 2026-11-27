@@ -18,16 +18,18 @@ export function LabelWithHint({
 	return (
 		<FieldLabel htmlFor={htmlFor} className="inline-flex items-center gap-2">
 			{label}
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						tabIndex={-1}
-						className="inline-flex shrink-0 text-muted-foreground hover:text-foreground"
-						aria-label={hint}
-					>
-						<CircleHelp className="size-4" />
-					</button>
+			<Tooltip toggleable>
+				<TooltipTrigger
+					render={
+						<button
+							type="button"
+							tabIndex={-1}
+							className="inline-flex shrink-0 text-muted-foreground hover:text-foreground"
+							aria-label={hint}
+						/>
+					}
+				>
+					<CircleHelp className="size-4" />
 				</TooltipTrigger>
 				<TooltipContent side="right" className="max-w-56">
 					{hint}

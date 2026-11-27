@@ -1,7 +1,6 @@
 import { useMutation } from "convex/react";
 import { BookText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { TranslationMappingsField } from "@/components/translation-mappings-field";
 import {
 	AlertDialog,
@@ -23,6 +22,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { toast } from "@/components/ui/toast";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getPublicConvexError } from "@/lib/expected-errors";
@@ -248,26 +248,33 @@ export function BroadcastGlossaryPanelView({
 	const triggerNode =
 		trigger === "none" ? null : (
 			<div className="rounded-lg border border-border bg-card">
-				<DialogTrigger asChild>
-					<button
-						type="button"
-						className="flex w-full items-center gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/50"
-					>
-						<BookText className="size-4 shrink-0 text-muted-foreground" />
-						<div className="min-w-0 flex-1">
-							<h3 className="text-sm font-medium text-foreground">Glossary</h3>
-							<p className="mt-0 truncate text-xs text-muted-foreground">
-								{termCountLabel}
-							</p>
-						</div>
-					</button>
+				<DialogTrigger
+					render={
+						<button
+							type="button"
+							className="flex w-full items-center gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/50"
+						/>
+					}
+				>
+					<BookText className="size-4 shrink-0 text-muted-foreground" />
+					<div className="min-w-0 flex-1">
+						<h3 className="text-sm font-medium text-foreground">Glossary</h3>
+						<p className="mt-0 truncate text-xs text-muted-foreground">
+							{termCountLabel}
+						</p>
+					</div>
 				</DialogTrigger>
 			</div>
 		);
 
 	return (
 		<>
-			<Dialog open={open} onOpenChange={handleOpenChange}>
+			<Dialog
+				open={open}
+				dismissible={!isDirty}
+				onDismissAttempt={() => setDiscardOpen(true)}
+				onOpenChange={handleOpenChange}
+			>
 				{triggerNode}
 
 				<DialogContent className="sm:max-w-xl">

@@ -1,6 +1,6 @@
 import { ConvexError } from "convex/values";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import {
 	getClipboardErrorMessage,
 	getPublicConvexError,

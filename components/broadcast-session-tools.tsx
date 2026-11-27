@@ -49,29 +49,32 @@ export function BroadcastSessionTools({
 
 	if (collapsed) {
 		return (
-			<Sheet open={sheetOpen} onOpenChange={onSheetOpenChange}>
-				<SheetTrigger asChild>
-					<Button
-						variant="outline"
-						size="sm"
-						className={cn("gap-1.5", className)}
-						aria-label="Share and glossary"
-					>
-						<PanelRight className="size-4" />
-						<span className="hidden sm:inline">Share & glossary</span>
-					</Button>
-				</SheetTrigger>
-				<SheetContent
-					side="right"
-					className="w-full overflow-y-auto sm:max-w-md"
+			<Sheet
+				side="right"
+				open={sheetOpen}
+				onOpenChange={(open) => onSheetOpenChange?.(open)}
+			>
+				<SheetTrigger
+					render={
+						<Button
+							variant="outline"
+							size="sm"
+							className={cn("gap-1.5", className)}
+							aria-label="Share and glossary"
+						/>
+					}
 				>
+					<PanelRight className="size-4" />
+					<span className="hidden sm:inline">Share & glossary</span>
+				</SheetTrigger>
+				<SheetContent className="w-full overflow-y-auto sm:max-w-md">
 					<SheetHeader>
 						<SheetTitle>Share & glossary</SheetTitle>
 						<SheetDescription>
 							Share the viewer link or edit the glossary.
 						</SheetDescription>
 					</SheetHeader>
-					<div className="mt-8 px-4 pb-4">{tools}</div>
+					<div className="mt-4 px-4 pb-4">{tools}</div>
 				</SheetContent>
 			</Sheet>
 		);

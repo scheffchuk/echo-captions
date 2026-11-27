@@ -22,6 +22,7 @@ import {
 	CommandGroup,
 	CommandInput,
 	CommandItem,
+	CommandItemText,
 	CommandList,
 } from "@/components/ui/command";
 import {
@@ -34,11 +35,13 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { getPublicConvexError } from "@/lib/expected-errors";
@@ -361,18 +364,20 @@ export function CreateEventFormView({
 				if (!next) reset();
 			}}
 		>
-			<DialogTrigger asChild>
-				<Button
-					variant={triggerVariant === "outline" ? "outline" : undefined}
-					className={
-						triggerVariant === "primary"
-							? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
-							: undefined
-					}
-				>
-					<Plus className="size-4" />
-					New event
-				</Button>
+			<DialogTrigger
+				render={
+					<Button
+						variant={triggerVariant === "outline" ? "outline" : undefined}
+						className={
+							triggerVariant === "primary"
+								? "bg-echo-live text-echo-live-foreground hover:bg-echo-live/90"
+								: undefined
+						}
+					/>
+				}
+			>
+				<Plus className="size-4" />
+				New event
 			</DialogTrigger>
 			<DialogContent
 				className="gap-0 overflow-hidden p-0 sm:max-w-xl"
@@ -398,13 +403,11 @@ export function CreateEventFormView({
 							</DialogDescription>
 						</div>
 						<div className="absolute top-4 right-4 flex items-center gap-2">
-							<div
-								role="progressbar"
-								aria-valuenow={currentStep + 1}
-								aria-valuemin={1}
-								aria-valuemax={STEPS.length}
+							<Progress
+								value={currentStep + 1}
+								min={1}
+								max={STEPS.length}
 								aria-label={`Step ${currentStep + 1} of ${STEPS.length}`}
-								className="flex items-center gap-2"
 							>
 								{STEPS.map((step, index) => (
 									<div
@@ -418,8 +421,8 @@ export function CreateEventFormView({
 										)}
 									/>
 								))}
-							</div>
-							<DialogClose className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
+							</Progress>
+							<DialogClose className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
 								<X />
 								<span className="sr-only">Close</span>
 							</DialogClose>
@@ -547,42 +550,65 @@ function StepEventDetails({ form }: { form: CreateEventFormApi }) {
 					const eventDate = field.state.value;
 
 					return (
-						<Field>
-							<FieldLabel htmlFor={field.name}>Event Date</FieldLabel>
-							<Popover>
-								<PopoverTrigger asChild>
-									<Button
-										id={field.name}
-										variant="outline"
-										className={cn(
-											"w-full justify-start text-left font-normal",
-											!eventDate && "text-muted-foreground",
-										)}
-									>
-										<CalendarIcon className="mr-2 size-4" />
-										{eventDate ? (
-											eventDate.toLocaleDateString(undefined, {
-												dateStyle: "long",
-											})
-										) : (
-											<span>Pick a date</span>
-										)}
-									</Button>
-								</PopoverTrigger>
-								<PopoverContent className="w-auto p-0" align="start">
-									<Calendar
-										mode="single"
-										selected={eventDate}
-										onSelect={field.handleChange}
-										autoFocus
-									/>
-								</PopoverContent>
-							</Popover>
-						</Field>
+						<EventDateField
+							name={field.name}
+							value={eventDate}
+							onChange={(date) => field.handleChange(date)}
+						/>
 					);
 				}}
 			</form.Field>
 		</div>
+	);
+}
+
+function EventDateField({
+	name,
+	value,
+	onChange,
+}: {
+	name: string;
+	value: Date | undefined;
+	onChange: (date: Date | undefined) => void;
+}) {
+	const [open, setOpen] = useState(false);
+
+	return (
+		<Field>
+			<Label htmlFor={name}>Event Date</Label>
+			<Popover open={open} onOpenChange={setOpen}>
+				<PopoverTrigger
+					render={
+						<Button
+							id={name}
+							variant="outline"
+							className={cn(
+								"w-full justify-start text-left font-normal",
+								!value && "text-muted-foreground",
+							)}
+						/>
+					}
+				>
+					<CalendarIcon className="mr-2 size-4" />
+					{value ? (
+						value.toLocaleDateString(undefined, {
+							dateStyle: "long",
+						})
+					) : (
+						<span>Pick a date</span>
+					)}
+				</PopoverTrigger>
+				<PopoverContent className="w-auto p-0" align="start">
+					<Calendar
+						selected={value}
+						onSelect={(next) => {
+							onChange(next);
+							setOpen(false);
+						}}
+					/>
+				</PopoverContent>
+			</Popover>
+		</Field>
 	);
 }
 
@@ -778,36 +804,48 @@ function AddLanguageButton({
 	onAdd: (code: string) => void;
 	disabled?: boolean;
 }) {
+	const [open, setOpen] = useState(false);
+
 	const available = COMMON_LANGUAGES.filter(
 		(lang) => !disabledCodes.includes(lang.code),
 	);
 
 	return (
-		<Popover modal>
-			<PopoverTrigger asChild>
-				<Button
-					variant="outline"
-					size="sm"
-					className="border-dashed text-muted-foreground"
-					disabled={disabled || available.length === 0}
-				>
-					<Plus className="size-4" />
-					Add language
-				</Button>
+		<Popover open={open} onOpenChange={setOpen} modal>
+			<PopoverTrigger
+				disabled={disabled || available.length === 0}
+				render={
+					<Button
+						variant="outline"
+						size="sm"
+						className="border-dashed text-muted-foreground"
+					/>
+				}
+			>
+				<Plus className="size-4" />
+				Add language
 			</PopoverTrigger>
 			<PopoverContent className="w-56 p-0" align="start">
-				<Command>
-					<CommandInput placeholder="Search language..." />
+				<Command
+					onAction={(code) => {
+						onAdd(code);
+						setOpen(false);
+					}}
+				>
+					<CommandInput
+						aria-label="Search language"
+						placeholder="Search language..."
+					/>
+					<CommandEmpty>No language found.</CommandEmpty>
 					<CommandList>
-						<CommandEmpty>No language found.</CommandEmpty>
 						<CommandGroup>
 							{available.map((lang) => (
 								<CommandItem
 									key={lang.code}
-									value={lang.name}
-									onSelect={() => onAdd(lang.code)}
+									value={lang.code}
+									label={lang.name}
 								>
-									{lang.name}
+									<CommandItemText />
 								</CommandItem>
 							))}
 						</CommandGroup>

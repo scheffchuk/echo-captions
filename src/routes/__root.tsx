@@ -8,7 +8,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { ThemeProvider } from "next-themes";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toast";
 import appCss from "../../app/globals.css?url";
 import fontCss from "../fonts.css?url";
 
@@ -66,7 +66,8 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</head>
 			<body className="font-sans antialiased bg-background text-foreground">
 				<ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-					<TooltipProvider>{children}</TooltipProvider>
+					{children}
+					<Toaster />
 				</ThemeProvider>
 				<Analytics />
 				<Scripts />

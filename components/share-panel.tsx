@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
 	Popover,
 	PopoverContent,
+	PopoverTitle,
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -47,14 +48,23 @@ export function SharePanel({ slug }: { slug: string }) {
 							<Copy className="size-4" />
 						)}
 					</Button>
-					<Popover>
-						<PopoverTrigger asChild>
-							<Button variant="ghost" size="icon-sm" aria-label="Show QR code">
-								<QrCode className="size-4" />
-							</Button>
+					<Popover presentation="auto">
+						<PopoverTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label="Show QR code"
+								/>
+							}
+						>
+							<QrCode className="size-4" />
 						</PopoverTrigger>
 						<PopoverContent className="w-auto p-4">
-							<QRCodeSVG value={viewerUrl} size={160} />
+							<PopoverTitle className="sr-only">Viewer QR code</PopoverTitle>
+							<div className="flex justify-center">
+								<QRCodeSVG value={viewerUrl} size={160} />
+							</div>
 						</PopoverContent>
 					</Popover>
 				</div>

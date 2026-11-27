@@ -1,11 +1,20 @@
-import { useMemo } from "react"
+import {
+  Field as UiField,
+  FieldDescription as UiFieldDescription,
+  FieldError as UiFieldError,
+  FieldGroup as UiFieldGroup,
+  FieldLabel as UiFieldLabel,
+  FieldLegend as UiFieldLegend,
+  FieldSet as UiFieldSet,
+} from "@ui-sdk/react/field"
 import { cva, type VariantProps } from "class-variance-authority"
+import type * as React from "react"
+import { useMemo } from "react"
 
 import { cn } from "@/lib/utils"
-import { Label } from "@/components/ui/label"
 
 const fieldVariants = cva(
-  "group/field flex w-full gap-2 data-[invalid=true]:text-destructive",
+  "group/field flex w-full gap-2 data-invalid:text-destructive",
   {
     variants: {
       orientation: {
@@ -26,11 +35,12 @@ function Field({
   className,
   orientation = "vertical",
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+}: Omit<React.ComponentProps<typeof UiField>, "className"> &
+  VariantProps<typeof fieldVariants> & {
+    className?: string
+  }) {
   return (
-    <div
-      role="group"
-      data-slot="field"
+    <UiField
       data-orientation={orientation}
       className={cn(fieldVariants({ orientation }), className)}
       {...props}
@@ -41,15 +51,29 @@ function Field({
 function FieldLabel({
   className,
   ...props
-}: React.ComponentProps<typeof Label>) {
+}: Omit<React.ComponentProps<typeof UiFieldLabel>, "className"> & {
+  className?: string
+}) {
   return (
-    <Label
-      data-slot="field-label"
+    <UiFieldLabel
       className={cn(
-        "group/field-label peer/field-label flex w-fit gap-2 leading-snug group-data-[disabled=true]/field:opacity-50 has-data-checked:border-primary/30 has-data-checked:bg-primary/5 has-[>[data-slot=field]]:rounded-lg has-[>[data-slot=field]]:border *:data-[slot=field]:p-2.5 dark:has-data-checked:border-primary/20 dark:has-data-checked:bg-primary/10",
-        "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:flex-col",
+        "group/field-label peer/field-label flex w-fit items-center gap-2 text-sm leading-snug font-medium select-none group-data-disabled/field:opacity-50",
         className
       )}
+      {...props}
+    />
+  )
+}
+
+function FieldDescription({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiFieldDescription>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiFieldDescription
+      className={cn("text-xs text-muted-foreground", className)}
       {...props}
     />
   )
@@ -59,8 +83,11 @@ function FieldError({
   className,
   children,
   errors,
+  match,
   ...props
-}: React.ComponentProps<"div"> & {
+}: Omit<React.ComponentProps<typeof UiFieldError>, "className" | "children"> & {
+  className?: string
+  children?: React.ReactNode
   errors?: Array<{ message?: string } | undefined>
 }) {
   const content = useMemo(() => {
@@ -76,7 +103,7 @@ function FieldError({
       ...new Map(errors.map((error) => [error?.message, error])).values(),
     ]
 
-    if (uniqueErrors?.length == 1) {
+    if (uniqueErrors.length === 1) {
       return uniqueErrors[0]?.message
     }
 
@@ -90,24 +117,82 @@ function FieldError({
     )
   }, [children, errors])
 
+  if (match !== undefined) {
+    return (
+      <UiFieldError
+        match={match}
+        className={cn("text-sm font-normal text-destructive", className)}
+        {...props}
+      >
+        {content}
+      </UiFieldError>
+    )
+  }
+
   if (!content) {
     return null
   }
 
   return (
-    <div
+    <UiFieldError
+      match
       role="alert"
-      data-slot="field-error"
       className={cn("text-sm font-normal text-destructive", className)}
       {...props}
     >
       {content}
-    </div>
+    </UiFieldError>
+  )
+}
+
+function FieldSet({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiFieldSet>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiFieldSet
+      className={cn("m-0 min-w-0 border-0 p-0", className)}
+      {...props}
+    />
+  )
+}
+
+function FieldLegend({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiFieldLegend>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiFieldLegend
+      className={cn("text-sm font-medium text-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+function FieldGroup({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiFieldGroup>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiFieldGroup
+      className={cn("flex flex-col gap-4", className)}
+      {...props}
+    />
   )
 }
 
 export {
   Field,
-  FieldLabel,
+  FieldDescription,
   FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
 }

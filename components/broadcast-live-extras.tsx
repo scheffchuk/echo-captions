@@ -14,6 +14,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuItemIcon,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -49,39 +50,50 @@ export function BroadcastLiveExtras({
 
 	return (
 		<>
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
-					<Button
-						variant="outline"
-						size="sm"
-						className="gap-1.5"
-						aria-label="More session tools"
-					>
-						<MoreHorizontal className="size-4" />
-						More
-					</Button>
+			<DropdownMenu presentation="auto">
+				<DropdownMenuTrigger
+					render={
+						<Button
+							variant="outline"
+							size="sm"
+							className="gap-1.5"
+							aria-label="More session tools"
+						/>
+					}
+				>
+					<MoreHorizontal className="size-4" />
+					More
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
-					<DropdownMenuItem onSelect={() => void copyLink()}>
-						{copied ? (
-							<Check className="size-4" />
-						) : (
-							<Copy className="size-4" />
-						)}
+					<DropdownMenuItem value="copy-link" onSelect={() => void copyLink()}>
+						<DropdownMenuItemIcon>
+							{copied ? (
+								<Check className="size-4" />
+							) : (
+								<Copy className="size-4" />
+							)}
+						</DropdownMenuItemIcon>
 						{copied ? "Copied" : "Copy link"}
 					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={() => setQrOpen(true)}>
-						<QrCode className="size-4" />
+					<DropdownMenuItem value="qr-code" onSelect={() => setQrOpen(true)}>
+						<DropdownMenuItemIcon>
+							<QrCode className="size-4" />
+						</DropdownMenuItemIcon>
 						QR code
 					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={() => setGlossaryOpen(true)}>
-						<BookText className="size-4" />
+					<DropdownMenuItem
+						value="glossary"
+						onSelect={() => setGlossaryOpen(true)}
+					>
+						<DropdownMenuItemIcon>
+							<BookText className="size-4" />
+						</DropdownMenuItemIcon>
 						Glossary
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
 
-			<Dialog open={qrOpen} onOpenChange={setQrOpen}>
+			<Dialog open={qrOpen} onOpenChange={setQrOpen} presentation="auto">
 				<DialogContent className="max-w-xs">
 					<DialogHeader>
 						<DialogTitle>Viewer QR code</DialogTitle>

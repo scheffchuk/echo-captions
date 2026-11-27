@@ -1,8 +1,8 @@
 import { Link } from "@tanstack/react-router";
+import { useShortcut } from "@ui-sdk/react/shortcuts";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useEffectEvent, useState } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 import { BroadcastControlBar } from "@/components/broadcast-control-bar";
 import { BroadcastLiveExtras } from "@/components/broadcast-live-extras";
 import {
@@ -27,7 +27,7 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Toaster } from "@/components/ui/sonner";
+import { toast } from "@/components/ui/toast";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatRejectedCaptures } from "@/hooks/broadcast-capture";
@@ -44,16 +44,6 @@ import {
 	operatorCommitsToFeedItems,
 } from "@/lib/operator-commit-feed";
 import { cn } from "@/lib/utils";
-
-function isEditableTarget(target: EventTarget | null) {
-	if (!(target instanceof HTMLElement)) return false;
-
-	if (target.isContentEditable) return true;
-
-	return Boolean(
-		target.closest("input, textarea, select, [contenteditable=true]"),
-	);
-}
 
 export function BroadcastInterface({ slug }: { slug: string }) {
 	const session = useQuery(api.sessions.getMineBySlug, { slug });
@@ -201,31 +191,10 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 		window.setTimeout(() => URL.revokeObjectURL(url), 0);
 	};
 
-	const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-		if (event.code !== "Space" && event.key !== " ") return;
-
-		if (event.repeat) return;
-
-		if (isEditableTarget(event.target)) return;
-
-		if (
-			event.target instanceof HTMLElement &&
-			event.target.closest('[role="dialog"], [role="alertdialog"]')
-		) {
-			return;
-		}
-
-		if (stopConfirmOpen || abandonConfirmOpen || toolsOpen) return;
-		event.preventDefault();
-		requestRecording();
+	useShortcut("space", requestRecording, {
+		when: () => !stopConfirmOpen && !abandonConfirmOpen && !toolsOpen,
+		description: "Start or stop live captions",
 	});
-
-	useEffect(() => {
-		const listener = (event: KeyboardEvent) => onKeyDown(event);
-		window.addEventListener("keydown", listener);
-
-		return () => window.removeEventListener("keydown", listener);
-	}, []);
 
 	const handleDeviceChange = (nextDeviceId: string) => {
 		setDeviceId(nextDeviceId);
@@ -391,7 +360,6 @@ export function BroadcastInterface({ slug }: { slug: string }) {
 	return (
 		<OperatorChrome>
 			<main className="flex h-dvh flex-col p-4">
-				<Toaster />
 				<div className="mx-auto flex w-full max-w-7xl min-h-0 flex-1 flex-col">
 					<div
 						className={cn(

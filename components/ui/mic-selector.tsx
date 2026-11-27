@@ -1,11 +1,13 @@
 import { Cause, Effect, Exit, Option, Stream } from "effect";
-import { Check, ChevronsUpDown, Mic } from "lucide-react";
+import { ChevronsUpDown, Mic } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -65,34 +67,38 @@ export function MicSelector({
 			deviceId: "",
 		};
 
-	const handleDeviceSelect = (deviceId: string, e?: React.MouseEvent) => {
-		e?.preventDefault();
+	const handleDeviceSelect = (deviceId: string) => {
 		setSelectedDevice(deviceId);
 		onValueChange?.(deviceId);
 	};
 
-	const handleDropdownOpenChange = async (open: boolean) => {
+	const handleDropdownOpenChange = (open: boolean) => {
 		if (open && !hasPermission && !loading) {
-			await requestMicrophoneAccess();
+			void requestMicrophoneAccess();
 		}
 	};
 
 	return (
-		<DropdownMenu onOpenChange={handleDropdownOpenChange}>
-			<DropdownMenuTrigger asChild>
-				<Button
-					variant="ghost"
-					size="sm"
-					className={cn(
-						"hover:bg-accent flex w-auto shrink cursor-pointer items-center gap-1.5 px-2",
-						className,
-					)}
-					disabled={loading || disabled}
-					aria-label={`Microphone: ${currentDevice.label}`}
-				>
-					<Mic className="h-4 w-4 shrink-0" />
-					<ChevronsUpDown className="h-3 w-3 shrink-0" />
-				</Button>
+		<DropdownMenu
+			presentation="auto"
+			onOpenChange={handleDropdownOpenChange}
+		>
+			<DropdownMenuTrigger
+				disabled={loading || disabled}
+				render={
+					<Button
+						variant="ghost"
+						size="sm"
+						className={cn(
+							"hover:bg-accent flex w-auto shrink cursor-pointer items-center gap-1.5 px-2",
+							className,
+						)}
+						aria-label={`Microphone: ${currentDevice.label}`}
+					/>
+				}
+			>
+				<Mic className="h-4 w-4 shrink-0" />
+				<ChevronsUpDown className="h-3 w-3 shrink-0" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="center" side="top" className="w-72">
 				{loading ? (
@@ -102,19 +108,24 @@ export function MicSelector({
 				) : devices.length === 0 ? (
 					<DropdownMenuItem disabled>No microphones found</DropdownMenuItem>
 				) : (
-					devices.map((device) => (
-						<DropdownMenuItem
-							key={device.deviceId}
-							onClick={(e) => handleDeviceSelect(device.deviceId, e)}
-							onSelect={(e) => e.preventDefault()}
-							className="flex items-center justify-between"
-						>
-							<span className="truncate">{device.label}</span>
-							{selectedDevice === device.deviceId ? (
-								<Check className="h-4 w-4 shrink-0" />
-							) : null}
-						</DropdownMenuItem>
-					))
+					<DropdownMenuRadioGroup
+						value={selectedDevice || null}
+						onValueChange={(nextValue) => {
+							if (nextValue) {
+								handleDeviceSelect(nextValue);
+							}
+						}}
+					>
+						{devices.map((device) => (
+							<DropdownMenuRadioItem
+								key={device.deviceId}
+								value={device.deviceId}
+								closeOnSelect={false}
+							>
+								{device.label}
+							</DropdownMenuRadioItem>
+						))}
+					</DropdownMenuRadioGroup>
 				)}
 			</DropdownMenuContent>
 		</DropdownMenu>

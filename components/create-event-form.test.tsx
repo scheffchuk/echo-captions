@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateEventFormView } from "@/components/create-event-form";
-import { TooltipProvider } from "@/components/ui/tooltip";
 
 if (!Element.prototype.hasPointerCapture) {
 	Element.prototype.hasPointerCapture = () => false;
@@ -32,12 +31,7 @@ beforeEach(() => {
 async function openForm() {
 	const user = userEvent.setup();
 	render(
-		<TooltipProvider>
-			<CreateEventFormView
-				createSession={createSession}
-				onCreated={onCreated}
-			/>
-		</TooltipProvider>,
+		<CreateEventFormView createSession={createSession} onCreated={onCreated} />,
 	);
 	await user.click(screen.getByRole("button", { name: "New event" }));
 
@@ -91,15 +85,15 @@ describe("CreateEventForm", () => {
 		);
 		await user.click(screen.getByRole("button", { name: "Event Date" }));
 
-		const dateButton = screen
-			.getAllByRole("button")
-			.find((button) => button.hasAttribute("data-day"));
+		const dateCell = screen
+			.getAllByRole("gridcell")
+			.find((cell) => cell.hasAttribute("data-day"));
 
-		if (!(dateButton instanceof HTMLElement)) {
-			throw new Error("Expected a date button");
+		if (!(dateCell instanceof HTMLElement)) {
+			throw new Error("Expected a date cell");
 		}
 
-		await user.click(dateButton);
+		await user.click(dateCell);
 		await user.click(screen.getByRole("button", { name: "Next" }));
 		await waitFor(() =>
 			expect(screen.getByText("Languages")).toBeInTheDocument(),

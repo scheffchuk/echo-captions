@@ -1,41 +1,50 @@
-import * as React from "react"
-import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
+import {
+  Menu as UiMenu,
+  MenuCheckboxItem as UiMenuCheckboxItem,
+  MenuContent as UiMenuContent,
+  MenuGroup as UiMenuGroup,
+  MenuGroupLabel as UiMenuGroupLabel,
+  MenuItem as UiMenuItem,
+  MenuItemIcon as UiMenuItemIcon,
+  MenuItemIndicator as UiMenuItemIndicator,
+  MenuRadioGroup as UiMenuRadioGroup,
+  MenuRadioItem as UiMenuRadioItem,
+  MenuSeparator as UiMenuSeparator,
+  MenuTrigger as UiMenuTrigger,
+} from "@ui-sdk/react/menu"
+import { CheckIcon } from "lucide-react"
+import type * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function DropdownMenu({
-  ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+function DropdownMenu({ ...props }: React.ComponentProps<typeof UiMenu>) {
+  return <UiMenu {...props} />
 }
 
 function DropdownMenuTrigger({
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
-  return (
-    <DropdownMenuPrimitive.Trigger
-      data-slot="dropdown-menu-trigger"
-      {...props}
-    />
-  )
+}: React.ComponentProps<typeof UiMenuTrigger>) {
+  return <UiMenuTrigger {...props} />
 }
 
 function DropdownMenuContent({
   className,
   align = "start",
-  sideOffset = 4,
+  sideOffset = 6,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: Omit<React.ComponentProps<typeof UiMenuContent>, "className"> & {
+  className?: string
+}) {
   return (
-    <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
-        data-slot="dropdown-menu-content"
-        sideOffset={sideOffset}
-        align={align}
-        className={cn("z-50 max-h-(--radix-dropdown-menu-content-available-height) w-(--radix-dropdown-menu-trigger-width) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
-        {...props}
-      />
-    </DropdownMenuPrimitive.Portal>
+    <UiMenuContent
+      sideOffset={sideOffset}
+      align={align}
+      className={cn(
+        "z-50 m-0 max-h-(--available-height) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border-0 bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none transition-[opacity,scale] duration-150 data-starting-style:scale-96 data-starting-style:opacity-0 data-ending-style:scale-96 data-ending-style:opacity-0 data-[presentation=sheet]:w-full data-[presentation=sheet]:max-h-[85dvh] data-[presentation=sheet]:rounded-t-2xl data-[presentation=sheet]:rounded-b-none data-[presentation=sheet]:p-2 data-[presentation=sheet]:transition-none motion-reduce:transition-none",
+        className
+      )}
+      {...props}
+    />
   )
 }
 
@@ -44,17 +53,18 @@ function DropdownMenuItem({
   inset,
   variant = "default",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+}: Omit<React.ComponentProps<typeof UiMenuItem>, "className"> & {
+  className?: string
   inset?: boolean
   variant?: "default" | "destructive"
 }) {
   return (
-    <DropdownMenuPrimitive.Item
-      data-slot="dropdown-menu-item"
-      data-inset={inset}
+    <UiMenuItem
+      destructive={variant === "destructive"}
+      data-inset={inset || undefined}
       data-variant={variant}
       className={cn(
-        "group/dropdown-menu-item relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive",
+        "group/dropdown-menu-item relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:pl-7 data-destructive:text-destructive data-destructive:data-highlighted:bg-destructive/10 data-destructive:data-highlighted:text-destructive dark:data-destructive:data-highlighted:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -62,9 +72,127 @@ function DropdownMenuItem({
   )
 }
 
+function DropdownMenuRadioGroup({
+  ...props
+}: React.ComponentProps<typeof UiMenuRadioGroup>) {
+  return <UiMenuRadioGroup {...props} />
+}
+
+function DropdownMenuRadioItem({
+  className,
+  children,
+  ...props
+}: Omit<
+  React.ComponentProps<typeof UiMenuRadioItem>,
+  "className" | "children"
+> & {
+  className?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <UiMenuRadioItem
+      className={cn(
+        "relative flex cursor-default items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        className
+      )}
+      {...props}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <UiMenuItemIndicator className="flex size-4 shrink-0 items-center justify-center">
+        <CheckIcon className="size-4" aria-hidden="true" />
+      </UiMenuItemIndicator>
+    </UiMenuRadioItem>
+  )
+}
+
+function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: Omit<
+  React.ComponentProps<typeof UiMenuCheckboxItem>,
+  "className" | "children"
+> & {
+  className?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <UiMenuCheckboxItem
+      className={cn(
+        "relative flex cursor-default items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        className
+      )}
+      {...props}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <UiMenuItemIndicator className="flex size-4 shrink-0 items-center justify-center">
+        <CheckIcon className="size-4" aria-hidden="true" />
+      </UiMenuItemIndicator>
+    </UiMenuCheckboxItem>
+  )
+}
+
+function DropdownMenuItemIcon({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiMenuItemIcon>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiMenuItemIcon
+      className={cn("inline-flex shrink-0 items-center", className)}
+      {...props}
+    />
+  )
+}
+
+function DropdownMenuGroup({
+  ...props
+}: React.ComponentProps<typeof UiMenuGroup>) {
+  return <UiMenuGroup {...props} />
+}
+
+function DropdownMenuGroupLabel({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiMenuGroupLabel>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiMenuGroupLabel
+      className={cn(
+        "px-2 py-1.5 text-xs font-medium text-muted-foreground",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function DropdownMenuSeparator({
+  className,
+  ...props
+}: Omit<React.ComponentProps<typeof UiMenuSeparator>, "className"> & {
+  className?: string
+}) {
+  return (
+    <UiMenuSeparator
+      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      {...props}
+    />
+  )
+}
+
 export {
   DropdownMenu,
-  DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuGroupLabel,
   DropdownMenuItem,
+  DropdownMenuItemIcon,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 }

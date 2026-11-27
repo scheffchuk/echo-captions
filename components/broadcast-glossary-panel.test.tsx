@@ -6,7 +6,6 @@ import { ConvexError } from "convex/values";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BroadcastGlossaryPanelView } from "@/components/broadcast-glossary-panel";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { testId } from "@/test/ids";
 
 if (!Element.prototype.hasPointerCapture) {
@@ -32,18 +31,16 @@ function GlossaryHarness() {
 	const [open, setOpen] = useState(true);
 
 	return (
-		<TooltipProvider>
-			<BroadcastGlossaryPanelView
-				updateTranslationMappings={updateMappings}
-				sessionId={sessionId}
-				initialMappings={initialMappings}
-				initialRevisionId={revisionId}
-				audienceCodes={["en", "ja"]}
-				trigger="none"
-				open={open}
-				onOpenChange={setOpen}
-			/>
-		</TooltipProvider>
+		<BroadcastGlossaryPanelView
+			updateTranslationMappings={updateMappings}
+			sessionId={sessionId}
+			initialMappings={initialMappings}
+			initialRevisionId={revisionId}
+			audienceCodes={["en", "ja"]}
+			trigger="none"
+			open={open}
+			onOpenChange={setOpen}
+		/>
 	);
 }
 

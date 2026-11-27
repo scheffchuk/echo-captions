@@ -10,7 +10,6 @@ import {
 	Trash2,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { toast } from "sonner";
 import { ChangePasswordForm } from "@/components/change-password-form";
 import { CreateEventForm } from "@/components/create-event-form";
 import { EchoWordmark } from "@/components/echo-wordmark";
@@ -39,8 +38,9 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Toaster } from "@/components/ui/sonner";
+import { Input, InputClear } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon } from "@/components/ui/input-group";
+import { toast } from "@/components/ui/toast";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -214,11 +214,11 @@ function LiveLaunchpad({
 				<Button
 					size="lg"
 					className="bg-echo-live text-echo-live-foreground hover:bg-echo-live/90 sm:min-w-56"
-					asChild
+					render={
+						<Link to="/broadcast/$slug" params={{ slug: session.slug }} />
+					}
 				>
-					<Link to="/broadcast/$slug" params={{ slug: session.slug }}>
-						Continue
-					</Link>
+					Continue
 				</Button>
 				<div className="flex flex-wrap gap-2">{actions}</div>
 			</div>
@@ -248,10 +248,14 @@ function IdleSessionRow({
 				</p>
 			</div>
 			<div className="flex flex-wrap gap-1.5 sm:shrink-0">
-				<Button size="sm" variant="secondary" asChild>
-					<Link to="/broadcast/$slug" params={{ slug: session.slug }}>
-						Open
-					</Link>
+				<Button
+					size="sm"
+					variant="secondary"
+					render={
+						<Link to="/broadcast/$slug" params={{ slug: session.slug }} />
+					}
+				>
+					Open
 				</Button>
 				{actions}
 			</div>
@@ -329,20 +333,17 @@ export function Dashboard() {
 	return (
 		<OperatorChrome>
 			<main className="min-h-dvh p-4 md:p-8">
-				<Toaster />
 				<div className="mx-auto max-w-3xl space-y-10">
 					<header className="flex items-start justify-between gap-4">
 						<EchoWordmark size="title" />
 						<div className="flex shrink-0 items-center gap-2">
 							<ThemeToggle />
 							<Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
-								<DialogTrigger asChild>
-									<Button variant="outline" size="sm">
-										<KeyRound className="size-4" />
-										<span className="sr-only sm:not-sr-only sm:ml-2">
-											Password
-										</span>
-									</Button>
+								<DialogTrigger render={<Button variant="outline" size="sm" />}>
+									<KeyRound className="size-4" />
+									<span className="sr-only sm:not-sr-only sm:ml-2">
+										Password
+									</span>
 								</DialogTrigger>
 								<DialogContent>
 									<DialogHeader>
@@ -414,19 +415,23 @@ export function Dashboard() {
 										)}
 									>
 										{(sortedSessions?.length ?? 0) > 3 || searchQuery.trim() ? (
-											<div className="relative w-full sm:max-w-xs sm:ml-auto">
-												<Search
-													className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-													aria-hidden
-												/>
-												<Input
-													type="search"
-													value={searchQuery}
-													onChange={(e) => setSearchQuery(e.target.value)}
-													placeholder="Search…"
-													className="pl-8"
-													aria-label="Search events"
-												/>
+											<div className="w-full sm:max-w-xs sm:ml-auto">
+												<InputGroup>
+													<InputGroupAddon>
+														<Search aria-hidden />
+													</InputGroupAddon>
+													<Input
+														type="search"
+														value={searchQuery}
+														onValueChange={(value) => setSearchQuery(value)}
+														placeholder="Search…"
+														aria-label="Search events"
+													/>
+													<InputClear
+														aria-label="Clear search"
+														className="mr-1"
+													/>
+												</InputGroup>
 											</div>
 										) : isLaunchpad ? (
 											<p className="text-sm font-medium text-muted-foreground">

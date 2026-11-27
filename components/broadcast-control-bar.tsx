@@ -3,7 +3,11 @@ import { LanguagePairPicker } from "@/components/language-pair-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { MicSelector } from "@/components/ui/mic-selector";
-import { Separator } from "@/components/ui/separator";
+import {
+	Toolbar,
+	ToolbarGroup,
+	ToolbarSeparator,
+} from "@/components/ui/toolbar";
 import type {
 	BroadcastLifecycleStatus,
 	BroadcastVoiceState,
@@ -66,7 +70,7 @@ export function BroadcastControlBar({
 	return (
 		<div className={cn("flex justify-center", className)}>
 			<Card className="m-0 w-fit max-w-full gap-0 rounded-lg bg-card py-0 shadow-none ring-1 ring-border/60">
-				<div className="flex w-fit min-w-0 max-w-full flex-wrap items-center justify-center gap-2 p-2">
+				<Toolbar aria-label="Broadcast controls" className="p-2">
 					<div
 						className={cn(
 							"flex h-8 shrink-0 items-center rounded-md px-2 py-2",
@@ -88,14 +92,14 @@ export function BroadcastControlBar({
 							</span>
 						)}
 					</div>
-					<div className="flex min-w-0 shrink-0 items-center gap-2">
+					<ToolbarGroup aria-label="Audio and recording" className="shrink-0">
 						<MicSelector
 							value={deviceId}
 							onValueChange={onDeviceChange}
 							disabled={micSelectorDisabled}
 							onError={onMicError}
 						/>
-						<Separator orientation="vertical" className="mx-1 h-8" />
+						<ToolbarSeparator className="mx-1 h-8" />
 						<Button
 							variant={isVoiceActive && !isLost ? "destructive" : "default"}
 							size="default"
@@ -115,8 +119,8 @@ export function BroadcastControlBar({
 							)}
 							{recordLabel}
 						</Button>
-					</div>
-				</div>
+					</ToolbarGroup>
+				</Toolbar>
 			</Card>
 		</div>
 	);

@@ -53,6 +53,11 @@ export function TranslationMappingsField({
 
 	const globalIssues = issues.filter((item) => item.rowId === "$draft");
 
+	const audienceItems = audienceCodes.map((code) => ({
+		value: code,
+		label: getCommonLanguageName(code),
+	}));
+
 	return (
 		<Field>
 			<LabelWithHint
@@ -80,24 +85,31 @@ export function TranslationMappingsField({
 								aria-invalid={issues.some(
 									(item) => item.rowId === mapping.id && item.field === "term",
 								)}
-								onChange={(event) =>
-									updateMapping(mapping.id, { term: event.target.value })
+								onValueChange={(value) =>
+									updateMapping(mapping.id, { term: value })
 								}
 							/>
 							<Select
-								value={mapping.targetLanguage}
+								items={audienceItems}
+								value={mapping.targetLanguage || null}
 								disabled={disabled}
+								placeholder="Language"
 								onValueChange={(value) =>
-									updateMapping(mapping.id, { targetLanguage: value })
+									updateMapping(mapping.id, {
+										targetLanguage: value ?? "",
+									})
 								}
 							>
-								<SelectTrigger className="w-[140px] shrink-0">
+								<SelectTrigger
+									aria-label="Target language"
+									className="w-[140px] shrink-0"
+								>
 									<SelectValue placeholder="Language" />
 								</SelectTrigger>
 								<SelectContent>
-									{audienceCodes.map((code) => (
-										<SelectItem key={code} value={code}>
-											{getCommonLanguageName(code)}
+									{audienceItems.map((item) => (
+										<SelectItem key={item.value} value={item.value}>
+											{item.label}
 										</SelectItem>
 									))}
 								</SelectContent>
@@ -110,8 +122,8 @@ export function TranslationMappingsField({
 									(item) =>
 										item.rowId === mapping.id && item.field === "translation",
 								)}
-								onChange={(event) =>
-									updateMapping(mapping.id, { translation: event.target.value })
+								onValueChange={(value) =>
+									updateMapping(mapping.id, { translation: value })
 								}
 							/>
 							<Button

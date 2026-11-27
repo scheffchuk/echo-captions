@@ -1,7 +1,11 @@
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import {
+	PasswordInput,
+	PasswordInputControl,
+	PasswordInputToggle,
+} from "@/components/ui/password-input";
 import { getOperatorAuthErrorMessage } from "../src/lib/auth/operator";
 
 export function ChangePasswordForm({
@@ -44,50 +48,58 @@ export function ChangePasswordForm({
 		}
 	};
 
+	const currentInvalid = showValidation && currentPassword.length < 8;
+	const newInvalid = showValidation && newPassword.length < 8;
+
 	return (
 		<form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-			<div className="space-y-2">
-				<Label htmlFor="current-password">Current password</Label>
-				<Input
-					id="current-password"
+			<Field name="currentPassword" invalid={currentInvalid || undefined}>
+				<FieldLabel htmlFor="current-password">Current password</FieldLabel>
+				<PasswordInput
 					name="currentPassword"
-					type="password"
 					autoComplete="current-password"
 					value={currentPassword}
-					onChange={(event) => setCurrentPassword(event.target.value)}
-					onInvalid={() => setShowValidation(true)}
+					onValueChange={(value) => setCurrentPassword(value)}
 					required
-					minLength={8}
 					disabled={isSubmitting}
-				/>
-				{showValidation && currentPassword.length < 8 ? (
-					<p className="text-sm text-destructive">
-						Password must be at least 8 characters
-					</p>
+				>
+					<PasswordInputControl
+						id="current-password"
+						minLength={8}
+						onInvalid={() => setShowValidation(true)}
+					/>
+					<PasswordInputToggle aria-label="Show current password" />
+				</PasswordInput>
+				{currentInvalid ? (
+					<FieldError>Password must be at least 8 characters</FieldError>
 				) : null}
-			</div>
-			<div className="space-y-2">
-				<Label htmlFor="new-password">New password</Label>
-				<Input
-					id="new-password"
+			</Field>
+			<Field name="newPassword" invalid={newInvalid || undefined}>
+				<FieldLabel htmlFor="new-password">New password</FieldLabel>
+				<PasswordInput
 					name="newPassword"
-					type="password"
 					autoComplete="new-password"
 					value={newPassword}
-					onChange={(event) => setNewPassword(event.target.value)}
-					onInvalid={() => setShowValidation(true)}
+					onValueChange={(value) => setNewPassword(value)}
 					required
-					minLength={8}
 					disabled={isSubmitting}
-				/>
-				{showValidation && newPassword.length < 8 ? (
-					<p className="text-sm text-destructive">
-						Password must be at least 8 characters
-					</p>
+				>
+					<PasswordInputControl
+						id="new-password"
+						minLength={8}
+						onInvalid={() => setShowValidation(true)}
+					/>
+					<PasswordInputToggle aria-label="Show new password" />
+				</PasswordInput>
+				{newInvalid ? (
+					<FieldError>Password must be at least 8 characters</FieldError>
 				) : null}
-			</div>
+			</Field>
 			{submitError ? (
-				<div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+				<div
+					role="alert"
+					className="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+				>
 					{submitError}
 				</div>
 			) : null}

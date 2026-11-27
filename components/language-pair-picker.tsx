@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
 	Popover,
 	PopoverContent,
+	PopoverTitle,
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import {
@@ -105,28 +106,34 @@ export function LanguagePairPicker({
 	return (
 		<Popover
 			open={open}
+			presentation={mode === "audience" ? "auto" : undefined}
 			onOpenChange={(next) => {
 				setOpen(next);
 
 				if (!next) setPickingTranslation(false);
 			}}
 		>
-			<PopoverTrigger asChild>
-				<Button
-					variant="outline"
-					size={size}
-					className={cn(
-						"justify-between border-border bg-background font-normal",
-						compact ? "w-auto" : "min-w-[160px]",
-						className,
-					)}
-					aria-label={mode === "audience" ? "Language" : "Display languages"}
-				>
-					<span className="truncate">{pairLabel(pair, compact)}</span>
-					<ChevronDown className="size-4 shrink-0 opacity-50" />
-				</Button>
+			<PopoverTrigger
+				render={
+					<Button
+						variant="outline"
+						size={size}
+						className={cn(
+							"justify-between border-border bg-background font-normal",
+							compact ? "w-auto" : "min-w-[160px]",
+							className,
+						)}
+						aria-label={mode === "audience" ? "Language" : "Display languages"}
+					/>
+				}
+			>
+				<span className="truncate">{pairLabel(pair, compact)}</span>
+				<ChevronDown className="size-4 shrink-0 opacity-50" />
 			</PopoverTrigger>
 			<PopoverContent align="end" className="w-max min-w-48 p-2">
+				<PopoverTitle className="sr-only">
+					{mode === "audience" ? "Choose language" : "Display languages"}
+				</PopoverTitle>
 				{mode === "audience" ? (
 					<div className="flex flex-col gap-1">
 						{pickingTranslation ? (
